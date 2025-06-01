@@ -1,14 +1,15 @@
 import os
 from openpyxl import Workbook
 from openpyxl.styles import Font
-from openpyxl.styles import PatternFill # 导入 PatternFill 用于背景色
+from openpyxl.styles import PatternFill
 
 def write_txt_paths_and_content_to_excel(folder_path, excel_file_path):
     """
     将指定文件夹及其子文件夹中所有 .txt 文件的完整路径写入 Excel 表的 A 列，
     将其内容写入 B 列，并将 B 列内容复制到 C 列，根据关键词删除 C 列中的指定词组。
     同时，根据内容为 B 列和 C 列的单元格设置字体颜色。
-    并尝试匹配同名的图片文件，将路径以超链接形式写入 D 列。
+    尝试匹配同名的图片文件，将路径以超链接形式写入 D 列。
+    新增一列 (E 列)，显示 TXT 文件所在的文件夹路径。
     如果内容含有换行符，则删除。
 
     Args:
@@ -23,30 +24,30 @@ def write_txt_paths_and_content_to_excel(folder_path, excel_file_path):
     sheet.cell(row=1, column=1, value="TXT文件路径")
     sheet.cell(row=1, column=2, value="原始内容")
     sheet.cell(row=1, column=3, value="清洗后的内容")
-    sheet.cell(row=1, column=4, value="对应图片文件") # D列标题改为更友好的名称
+    sheet.cell(row=1, column=4, value="对应图片文件")
+    sheet.cell(row=1, column=5, value="所在文件夹") # 新增列：E列
     
     row_num = 2  # 从第二行开始写入数据，因为第一行是表头
 
     # 定义字体颜色样式
-    red_font = Font(color="FF0000")    # 红色 (HEX码)
-    blue_font = Font(color="0000FF")   # 蓝色
-    yellow_font = Font(color="FFFF00") # 黄色
+    red_font = Font(color="FF0000")
+    blue_font = Font(color="0000FF")
+    yellow_font = Font(color="FFFF00")
     
-    # 定义超链接字体样式 (通常是蓝色带下划线，openpyxl 会自动设置)
+    # 定义超链接字体样式
     hyperlink_font = Font(color="0000FF", underline="single")
     
     # 定义未找到图片的背景色
-    no_image_fill = PatternFill(start_color="FFFCCB", end_color="FFFCCB", fill_type="solid") # 淡黄色背景
+    no_image_fill = PatternFill(start_color="FFFCCB", end_color="FFFCCB", fill_type="solid")
 
     # 定义常见的图片文件后缀
     image_extensions = [
         ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif", ".ico", ".svg"
     ]
 
-    txt_files_processed = 0 # 计数器，用于检查是否处理了任何TXT文件
+    txt_files_processed = 0
 
     try:
-        # 遍历指定文件夹及其子文件夹
         for root, dirs, files in os.walk(folder_path):
             for file in files:
                 if file.lower().endswith(".txt"):
@@ -85,10 +86,8 @@ def write_txt_paths_and_content_to_excel(folder_path, excel_file_path):
 
                     # --- C 列处理逻辑 ---
                     content_for_c = cleaned_content
-
                     keywords_to_remove = ["censor", "mosaic"] 
                     exception_words = ["uncensored"]
-
                     tags = [tag.strip() for tag in content_for_c.split(',')]
                     
                     filtered_tags = []
@@ -117,7 +116,7 @@ def write_txt_paths_and_content_to_excel(folder_path, excel_file_path):
 
                     # --- 匹配对应的图片文件 (D列 - 超链接形式) ---
                     matched_image_path = "未找到对应图片"
-                    image_found = False # 标记是否找到图片
+                    image_found = False
                     
                     try:
                         for entry in os.scandir(root):
@@ -126,7 +125,7 @@ def write_txt_paths_and_content_to_excel(folder_path, excel_file_path):
                                 
                                 if txt_basename == other_file_basename and other_file_ext.lower() in image_extensions:
                                     matched_image_path = entry.path
-                                    image_found = True # 标记为已找到
+                                    image_found = True
                                     break
                     except Exception as e:
                         print(f"警告: 无法扫描目录 {root} 或匹配图片。错误: {e}")
@@ -136,15 +135,19 @@ def write_txt_paths_and_content_to_excel(folder_path, excel_file_path):
                     d_cell = sheet.cell(row=row_num, column=4)
                     
                     if image_found:
-                        # 对于超链接，单元格的值通常是显示文本，超链接地址是实际路径
-                        d_cell.value = os.path.basename(matched_image_path) # 显示文件名
-                        d_cell.hyperlink = os.path.abspath(matched_image_path) # 超链接是绝对路径
-                        d_cell.font = hyperlink_font # 设置超链接字体
+                        d_cell.value = os.path.basename(matched_image_path)
+                        d_cell.hyperlink = os.path.abspath(matched_image_path)
+                        d_cell.font = hyperlink_font
                     else:
-                        d_cell.value = matched_image_path # 显示“未找到对应图片”或“图片匹配失败”
-                        d_cell.fill = no_image_fill # 未找到图片的单元格背景色
+                        d_cell.value = matched_image_path
+                        d_cell.fill = no_image_fill
 
                     # --- 图片文件匹配结束 ---
+
+                    # --- 新增 E 列：所在文件夹路径 ---
+                    # root 变量在 os.walk 循环中天然就是当前文件的所在文件夹路径
+                    sheet.cell(row=row_num, column=5, value=root)
+                    # --- E 列添加结束 ---
 
                     row_num += 1
         
@@ -152,7 +155,6 @@ def write_txt_paths_and_content_to_excel(folder_path, excel_file_path):
             print(f"未在 '{folder_path}' 及其子文件夹中找到任何 .txt 文件。未生成 Excel 文件。")
             return
 
-        # 确保输出文件所在的目录存在
         output_dir = os.path.dirname(excel_file_path)
         if output_dir and not os.path.exists(output_dir):
             try:
@@ -162,14 +164,12 @@ def write_txt_paths_and_content_to_excel(folder_path, excel_file_path):
                 print(f"错误: 无法创建输出目录 '{output_dir}'。请检查权限。错误: {e}")
                 return
 
-        # 保存 Excel 文件
         workbook.save(excel_file_path)
-        print(f"所有 .txt 文件的路径、内容和对应图片路径（超链接形式）已成功写入到 '{excel_file_path}'，并已设置字体颜色。")
+        print(f"所有 .txt 文件的路径、内容、对应图片路径（超链接形式）和所在文件夹路径已成功写入到 '{excel_file_path}'，并已设置字体颜色。")
 
     except Exception as e:
         print(f"发生了一个意外错误: {e}")
         print("请检查文件夹路径、文件权限或文件是否被其他程序占用。")
-
 
 
 
@@ -179,7 +179,8 @@ if __name__ == "__main__":
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     cleaned_folder_name = folder_to_scan.replace(":", "").replace("\\", "_").replace("/", "_").strip()
-    output_excel_file = os.path.join(script_dir, f"{cleaned_folder_name}_processed_tags_with_hyperlinks.xlsx") # 更新文件名以反映超链接
+    # 更新文件名，反映新增列
+    output_excel_file = os.path.join(script_dir, f"{cleaned_folder_name}_processed_tags_with_hyperlinks_and_folders.xlsx") 
 
     if os.path.exists(output_excel_file):
         print(f"提示：文件 '{output_excel_file}' 已存在。它将被覆盖。")
