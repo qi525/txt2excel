@@ -1,10 +1,14 @@
 import os
 from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.styles import PatternFill # 导入 PatternFill 用于背景色
 
 def write_txt_paths_and_content_to_excel(folder_path, excel_file_path):
     """
     将指定文件夹及其子文件夹中所有 .txt 文件的完整路径写入 Excel 表的 A 列，
     将其内容写入 B 列，并将 B 列内容复制到 C 列，根据关键词删除 C 列中的指定词组。
+    同时，根据内容为 B 列和 C 列的单元格设置字体颜色。
+    并尝试匹配同名的图片文件，将路径以超链接形式写入 D 列。
     如果内容含有换行符，则删除。
 
     Args:
@@ -16,100 +20,171 @@ def write_txt_paths_and_content_to_excel(folder_path, excel_file_path):
     sheet.title = "TXT文件信息"
 
     # 设置表头，让Excel内容更清晰
-    sheet.cell(row=1, column=1, value="文件路径")
+    sheet.cell(row=1, column=1, value="TXT文件路径")
     sheet.cell(row=1, column=2, value="原始内容")
-    # 错误发生在这里，已更正为 sheet.cell
-    sheet.cell(row=1, column=3, value="清洗后的内容") 
+    sheet.cell(row=1, column=3, value="清洗后的内容")
+    sheet.cell(row=1, column=4, value="对应图片文件") # D列标题改为更友好的名称
     
     row_num = 2  # 从第二行开始写入数据，因为第一行是表头
 
-    for root, dirs, files in os.walk(folder_path):
-        for file in files:
-            if file.lower().endswith(".txt"):
-                full_path = os.path.join(root, file)
+    # 定义字体颜色样式
+    red_font = Font(color="FF0000")    # 红色 (HEX码)
+    blue_font = Font(color="0000FF")   # 蓝色
+    yellow_font = Font(color="FFFF00") # 黄色
+    
+    # 定义超链接字体样式 (通常是蓝色带下划线，openpyxl 会自动设置)
+    hyperlink_font = Font(color="0000FF", underline="single")
+    
+    # 定义未找到图片的背景色
+    no_image_fill = PatternFill(start_color="FFFCCB", end_color="FFFCCB", fill_type="solid") # 淡黄色背景
 
-                # 将文件路径写入 A 列
-                sheet.cell(row=row_num, column=1, value=full_path)
+    # 定义常见的图片文件后缀
+    image_extensions = [
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif", ".ico", ".svg"
+    ]
 
-                # 读取 .txt 文件内容
-                txt_content = ""
-                try:
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        txt_content = f.read()
-                except Exception as e:
-                    print(f"无法读取文件 {full_path}: {e}")
-                    txt_content = "读取失败" # 如果读取失败，给出提示
+    txt_files_processed = 0 # 计数器，用于检查是否处理了任何TXT文件
 
-                # 删除换行符
-                cleaned_content = txt_content.replace('\r\n', '').replace('\n', '').replace('\r', '')
+    try:
+        # 遍历指定文件夹及其子文件夹
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                if file.lower().endswith(".txt"):
+                    full_path_txt = os.path.join(root, file)
+                    txt_files_processed += 1
 
-                # 将处理后的内容写入 B 列
-                sheet.cell(row=row_num, column=2, value=cleaned_content)
+                    # 提取TXT文件的主文件名 (不带后缀)
+                    txt_basename = os.path.splitext(file)[0]
 
-                # --- C 列的新处理逻辑 ---
-                # 复制 B 列内容到 C 列进行处理
-                content_for_c = cleaned_content
+                    # 将文件路径写入 A 列
+                    sheet.cell(row=row_num, column=1, value=full_path_txt)
 
-                # 定义需要检查的关键词。任何包含这些关键词的标签都将被移除。
-                # 注意：这里不包含 'uncensored'。
-                keywords_to_remove = ["censor", "mosaic"] 
-                
-                # 定义例外词，即使包含关键词也不移除
-                exception_words = ["uncensored"]
+                    # 读取 .txt 文件内容
+                    txt_content = ""
+                    try:
+                        with open(full_path_txt, 'r', encoding='utf-8') as f:
+                            txt_content = f.read()
+                    except Exception as e:
+                        print(f"警告: 无法读取文件 {full_path_txt}。错误: {e}")
+                        txt_content = "读取失败" 
 
-                # 将B列内容按逗号分割成单个标签，并去除空格
-                tags = [tag.strip() for tag in content_for_c.split(',')]
-                
-                # 过滤掉不需要的标签
-                filtered_tags = []
-                for tag in tags:
-                    is_unwanted = False
-                    # 检查是否是例外词
-                    if tag in exception_words:
-                        filtered_tags.append(tag) # 如果是例外词，直接保留
-                        continue # 跳过后续的移除检查
+                    # 删除换行符
+                    cleaned_content = txt_content.replace('\r\n', '').replace('\n', '').replace('\r', '')
+
+                    # 将处理后的内容写入 B 列
+                    b_cell = sheet.cell(row=row_num, column=2, value=cleaned_content)
                     
-                    # 检查标签是否包含任何需要移除的关键词
-                    for keyword in keywords_to_remove:
-                        # 使用 `in` 运算符进行子字符串匹配
-                        if keyword in tag: 
-                            is_unwanted = True
-                            break # 找到一个匹配项就跳出内部循环
+                    # 为 B 列设置字体颜色
+                    lower_cleaned_content = cleaned_content.lower()
+                    if "censor" in lower_cleaned_content:
+                        b_cell.font = red_font
+                    elif "no_humans" in lower_cleaned_content:
+                        b_cell.font = blue_font
+                    elif "boy" in lower_cleaned_content:
+                        b_cell.font = yellow_font
+
+                    # --- C 列处理逻辑 ---
+                    content_for_c = cleaned_content
+
+                    keywords_to_remove = ["censor", "mosaic"] 
+                    exception_words = ["uncensored"]
+
+                    tags = [tag.strip() for tag in content_for_c.split(',')]
                     
-                    # 如果标签不是不需要的（即不含关键词），并且不为空，则保留
-                    if not is_unwanted and tag: 
-                        filtered_tags.append(tag)
-                
-                # 重新将过滤后的标签用逗号连接起来
-                content_for_c = ','.join(filtered_tags)
-                
-                # --- C 列处理逻辑结束 ---
+                    filtered_tags = []
+                    for tag in tags:
+                        is_unwanted = False
+                        if tag in exception_words:
+                            filtered_tags.append(tag)
+                            continue
+                        
+                        for keyword in keywords_to_remove:
+                            if keyword in tag: 
+                                is_unwanted = True
+                                break
+                        
+                        if not is_unwanted and tag: 
+                            filtered_tags.append(tag)
+                    
+                    content_for_c = ','.join(filtered_tags)
 
-                # 将处理后的内容写入 C 列
-                sheet.cell(row=row_num, column=3, value=content_for_c)
+                    # 将处理后的内容写入 C 列
+                    c_cell = sheet.cell(row=row_num, column=3, value=content_for_c)
 
-                row_num += 1
+                    # 为 C 列设置字体颜色
+                    if "censor" in content_for_c.lower():
+                        c_cell.font = red_font
 
-    workbook.save(excel_file_path)
-    print(f"所有 .txt 文件的路径和内容已成功写入到 '{excel_file_path}'") # 修正了变量名
+                    # --- 匹配对应的图片文件 (D列 - 超链接形式) ---
+                    matched_image_path = "未找到对应图片"
+                    image_found = False # 标记是否找到图片
+                    
+                    try:
+                        for entry in os.scandir(root):
+                            if entry.is_file():
+                                other_file_basename, other_file_ext = os.path.splitext(entry.name)
+                                
+                                if txt_basename == other_file_basename and other_file_ext.lower() in image_extensions:
+                                    matched_image_path = entry.path
+                                    image_found = True # 标记为已找到
+                                    break
+                    except Exception as e:
+                        print(f"警告: 无法扫描目录 {root} 或匹配图片。错误: {e}")
+                        matched_image_path = "图片匹配失败"
+                        image_found = False
+
+                    d_cell = sheet.cell(row=row_num, column=4)
+                    
+                    if image_found:
+                        # 对于超链接，单元格的值通常是显示文本，超链接地址是实际路径
+                        d_cell.value = os.path.basename(matched_image_path) # 显示文件名
+                        d_cell.hyperlink = os.path.abspath(matched_image_path) # 超链接是绝对路径
+                        d_cell.font = hyperlink_font # 设置超链接字体
+                    else:
+                        d_cell.value = matched_image_path # 显示“未找到对应图片”或“图片匹配失败”
+                        d_cell.fill = no_image_fill # 未找到图片的单元格背景色
+
+                    # --- 图片文件匹配结束 ---
+
+                    row_num += 1
+        
+        if txt_files_processed == 0:
+            print(f"未在 '{folder_path}' 及其子文件夹中找到任何 .txt 文件。未生成 Excel 文件。")
+            return
+
+        # 确保输出文件所在的目录存在
+        output_dir = os.path.dirname(excel_file_path)
+        if output_dir and not os.path.exists(output_dir):
+            try:
+                os.makedirs(output_dir)
+                print(f"已创建输出目录: '{output_dir}'")
+            except OSError as e:
+                print(f"错误: 无法创建输出目录 '{output_dir}'。请检查权限。错误: {e}")
+                return
+
+        # 保存 Excel 文件
+        workbook.save(excel_file_path)
+        print(f"所有 .txt 文件的路径、内容和对应图片路径（超链接形式）已成功写入到 '{excel_file_path}'，并已设置字体颜色。")
+
+    except Exception as e:
+        print(f"发生了一个意外错误: {e}")
+        print("请检查文件夹路径、文件权限或文件是否被其他程序占用。")
 
 
-
-### **使用示例**
 
 
 if __name__ == "__main__":
     # 请将 'C:\mobile pic\Pictures' 替换为你实际要扫描的文件夹路径
-    folder_to_scan = r"C:\mobile pic\Pictures" # 使用原始字符串（r""）来避免反斜杠的转义问题
+    folder_to_scan = r"C:\mobile pic\Pictures" 
 
-    # 定义输出的 Excel 文件名和路径
-    # 清理文件夹名称，使其适合作为文件名
-    cleaned_folder_name = folder_to_scan.replace(":", "").replace("\\", " ").replace("/", " ").strip()
-    output_excel_file = f"{cleaned_folder_name}_processed_tags_v2.xlsx" # 添加新后缀以区分版本
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cleaned_folder_name = folder_to_scan.replace(":", "").replace("\\", "_").replace("/", "_").strip()
+    output_excel_file = os.path.join(script_dir, f"{cleaned_folder_name}_processed_tags_with_hyperlinks.xlsx") # 更新文件名以反映超链接
 
-    # 检查输出文件是否已存在
     if os.path.exists(output_excel_file):
         print(f"提示：文件 '{output_excel_file}' 已存在。它将被覆盖。")
-
-    # 调用函数将数据写入 Excel
-    write_txt_paths_and_content_to_excel(folder_to_scan, output_excel_file)
+    
+    if not os.path.isdir(folder_to_scan):
+        print(f"错误: 扫描文件夹 '{folder_to_scan}' 不存在或不是一个有效的目录。请检查路径。")
+    else:
+        write_txt_paths_and_content_to_excel(folder_to_scan, output_excel_file)
