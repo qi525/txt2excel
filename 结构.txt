@@ -1,0 +1,15 @@
+your_project_root/
+├── main.py                     # 主程序入口
+├── config.py                   # 配置常量
+├── utils/
+│   ├── __init__.py
+│   ├── file_operations.py      # 文件和目录操作
+│   └── excel_utils.py          # Excel 相关的工具函数
+├── services/
+│   ├── __init__.py
+│   ├── log_manager.py          # 日志管理
+│   └── history_manager.py      # 历史记录管理
+└── core/
+    ├── __init__.py
+    ├── data_processor.py       # 数据清洗和类型检测
+    └── scanner.py              # 文件扫描和数据提取核心逻辑
