@@ -12,8 +12,21 @@ from typing import Tuple, Dict, Optional, Set, List, Any
 import hashlib # 新增：导入hashlib用于生成文件夹名的哈希值
 
 
+
+# 注入运行历史记录
+#from execution_history import HistoryManager # 这一行不需要改变
+
 # 在 utils.py 顶部添加，清洗tag的模块！
 from tag_processing import detect_types, clean_tags 
+
+# 系统文件处理模块，文件夹和路径
+from file_system_utils import validate_directory, create_directory_if_not_exists, copy_file, get_file_details
+
+
+# from Scanner import scan_files_and_extract_data # <-- 注入 Scanner 模块的依赖
+
+# from excel_utils import set_hyperlink_and_style, set_fixed_column_widths, FIXED_COLUMN_WIDTH # <-- 注入 excel_utils 依赖
+
 
 # openpyxl 相关的导入
 from openpyxl import Workbook, load_workbook
@@ -42,10 +55,14 @@ CACHE_FOLDER_NAME = "cache"
 
 # 全局或常量定义超链接字体样式
 from openpyxl.styles import Font # 确保这里导入了Font
-HYPERLINK_FONT = Font(color="0000FF", underline="single")
+#HYPERLINK_FONT = Font(color="0000FF", underline="single")
 # 全局常量：所有Excel列的固定宽度
+#FIXED_COLUMN_WIDTH = 20
+# --- 常量 ---
+# 定义超链接字体样式
+HYPERLINK_FONT = Font(color="0000FF", underline="single")
+# 定义固定列宽（以字符为单位）
 FIXED_COLUMN_WIDTH = 20
-
 # 新增：文件保存重试参数
 MAX_SAVE_RETRIES = 5
 RETRY_DELAY_SECONDS = 2
@@ -61,6 +78,8 @@ RETRY_DELAY_SECONDS = 2
 # 新增：文件保存重试参数
 MAX_SAVE_RETRIES = 5  # 最大重试次数
 RETRY_DELAY_SECONDS = 0.5  # 每次重试之间的延迟 (秒)
+
+
 
 # --- Utility Function to Normalize Drive Letter ---
 def normalize_drive_letter(path_str: str) -> str:
@@ -97,71 +116,85 @@ def generate_folder_prefix(folder_path: Path) -> str:
         # 否则，使用文件夹名，并限制长度，防止文件名过长
         return folder_name[:30] # 限制为30个字符，避免过长
 
-def set_hyperlink_and_style(
-    cell, 
-    location: Optional[str], # location 现在可以是 Optional[str]
-    display_text: str, 
-    logger_obj: logger, 
-    source_description: str = "未知源"
-):
+
+
+
+
+# --- Excel Utilities ---
+def create_main_workbook():
     """
-    封装设置单元格超链接和样式的逻辑。
-    Args:
-        cell: openpyxl 单元格对象。
-        location (Optional[str]): 超链接指向的实际位置（文件路径或URL）。如果为None或空字符串，则不设置超链接。
-        display_text (str): 在单元格中显示的文本。
-        logger_obj (logger): 日志管理器实例。
-        source_description (str): 描述超链接来源，用于日志记录。
+    创建主Excel工作簿，包含“匹配文件”和“未匹配文件”工作表。
     """
-    try:
-        cell.value = display_text # 首先设置单元格显示文本
+    wb = Workbook()
+    
+    # 移除默认创建的Sheet
+    if 'Sheet' in wb.sheetnames:
+        wb.remove(wb['Sheet'])
         
-        # 只有当 location 不为 None 且不为空时才设置超链接
-        if location: # 检查 location 是否有效
-            cell.hyperlink = location # 然后设置超链接目标
-            cell.font = HYPERLINK_FONT # 最后应用预定义的超链接字体样式
-            logger_obj.info(
-                f"成功设置超链接和样式 for '{display_text}' (Location: '{location}', Source: {source_description})"
-            )
-        else:
-            # 如果没有 location，确保不设置超链接，并移除可能的超链接样式
-            cell.hyperlink = None 
-            cell.font = Font(color="000000") # 恢复默认字体颜色，去除下划线
-            # 这条日志保留，因为仍然是提示没有设置超链接，但级别可以低一些
-            logger_obj.info(f"未为 '{display_text}' (Source: {source_description}) 设置超链接，因为location无效或为空。")
+    return wb
 
-    except Exception as e:
-        logger_obj.error(
-            f"错误: 无法为单元格设置超链接或样式 for '{display_text}' (Location: '{location}', Source: {source_description}). 错误: {e}"
-        )
-        # 即使出错，也要确保单元格值被设置，即使没有超链接样式
-        cell.value = display_text
-
-# --- NEW FUNCTION: Set Fixed Column Widths for a Worksheet ---
-def set_fixed_column_widths(worksheet: Worksheet, width: int, logger_obj: logger):
+def setup_excel_sheets(wb: Workbook) -> Tuple[Worksheet, Worksheet, Worksheet]:
     """
-    为给定工作表的所有列设置固定宽度。
+    设置Excel工作表及其标题行。
+    """
+    # 匹配文件工作表
+    ws_matched = wb.create_sheet("匹配文件", 0) # 插入到最前面
+    ws_matched.append([
+        "文件夹路径", "文件绝对路径", "文件链接", "文件扩展名", "TXT文件绝对路径",
+        "TXT文件内容", "清洗后内容", "内容长度", "提示词类型", "找到TXT"
+    ])
+
+    # 未匹配文件工作表
+    ws_no_txt = wb.create_sheet("未匹配文件", 1) # 插入到第二个
+    ws_no_txt.append([
+        "文件夹路径", "文件绝对路径", "文件链接", "文件扩展名", "找到TXT"
+    ])
+
+    # Tag词频统计工作表
+    ws_tag_frequency = wb.create_sheet("Tag词频统计", 2) # 插入到第三个
+    ws_tag_frequency.append(["Tag", "出现次数"])
+
+    return ws_matched, ws_no_txt, ws_tag_frequency
+
+
+# --- New Function: Read Batch Paths ---
+def read_batch_paths(batch_file_path: Path, logger_obj) -> List[Path]:
+    """
+    从 batchPath.txt 文件中读取需要扫描的文件夹路径列表。
     Args:
-        worksheet (Worksheet): openpyxl 工作表对象。
-        width (int): 要设置的列宽。
+        batch_file_path (Path): batchPath.txt 文件的路径。
         logger_obj (logger): 日志管理器实例。
+    Returns:
+        List[Path]: 文件夹路径的列表。
     """
+    folders = []
+    if not batch_file_path.exists():
+        logger_obj.error(f"错误: 批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 不存在。")#error
+        print(f"错误: 批量路径文件 '{batch_file_path}' 不存在。")
+        return folders
     try:
-        for col_idx in range(1, worksheet.max_column + 1): # 从1开始遍历所有列
-            column_letter = get_column_letter(col_idx)
-            worksheet.column_dimensions[column_letter].width = width
-        logger_obj.info(f"已为工作表 '{worksheet.title}' 设置所有列宽度为 {width}.") # 替换为 Loguru 的 info 方法，to_file_only 行为 Loguru 默认在 setup 时配置
+        with open(batch_file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                path_str = line.strip()
+                if path_str and not path_str.startswith('#'): # 忽略空行和注释行
+                    folder_path = Path(path_str)
+                    if validate_directory(folder_path, logger_obj):
+                        folders.append(folder_path)
+                    else:
+                        logger_obj.warning(f"警告: 批量路径文件中的路径无效或不存在，已跳过: {normalize_drive_letter(str(folder_path))}")#warning
+        if not folders:
+            logger_obj.warning(f"警告: 批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 中没有找到有效的文件夹路径。")#warning
     except Exception as e:
-        #logger_obj.info(f"错误: 无法为工作表 '{worksheet.title}' 设置列宽: {e}")#error
-        logger_obj.error(f"错误: 无法为工作表 '{worksheet.title}' 设置列宽: {e}") # 替换为 Loguru 的 error 方法
-        print(f"错误: 无法为工作表 '{worksheet.title}' 设置列宽. 错误: {e}")
+        logger_obj.critical(f"错误: 读取批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 失败: {e}")#critical
+        print(f"错误: 读取批量路径文件 '{batch_file_path}' 失败。错误: {e}")
+    return folders
 
-# --- HistoryManager (Excel Version) ---
+
 class HistoryManager:
     """
     负责程序扫描历史记录的Excel文件存储。
     """
-    def __init__(self, history_file_path: Path, logger_obj: logger):
+    def __init__(self, history_file_path: Path, logger_obj):
         self.history_file_path = history_file_path
         self.logger_obj = logger_obj
         self.history_data: List[Dict[str, Any]] = [] # 存储内存中的历史记录
@@ -363,118 +396,83 @@ class HistoryManager:
             print(f"错误: 将历史记录保存到Excel失败 {self.history_file_path}. 错误: {e}")
             return False
 
-# --- File Operations ---
-def validate_directory(path: Path, logger_obj: logger) -> bool:
-    """
-    验证给定的路径是否是一个存在的目录。
-    """
-    if not path.is_dir():
-        if logger_obj:
-            logger_obj.warning(f"验证失败: 目录不存在或不是一个目录: {normalize_drive_letter(str(path))}")#warning
-        return False
-    return True
 
-# def create_directory_if_not_exists(directory_path: Path, logger_obj: Optional[logger]) -> bool:
-def create_directory_if_not_exists(directory_path: Path, logger_obj) -> bool: # 更改参数名为 logger_obj，并移除 logger 类型提示
+
+
+
+# --- 辅助函数 ---
+# 将 set_hyperlink_and_style 函数粘贴到这里
+def set_hyperlink_and_style(
+    cell, 
+    location: Optional[str], # location 现在可以是 Optional[str]
+    display_text: str, 
+    logger_obj, 
+    source_description: str = "未知源"
+):
     """
-    如果指定目录不存在，则创建它。
+    封装设置单元格超链接和样式的逻辑。
     Args:
-        directory_path (Path): 要创建的目录路径。
-        logger_obj (Optional[logger]): 日志管理器实例，可选。
-    Returns:
-        bool: 如果目录存在或成功创建，则返回True；否则返回False。
+        cell: openpyxl 单元格对象。
+        location (Optional[str]): 超链接指向的实际位置（文件路径或URL）。如果为None或空字符串，则不设置超链接。
+        display_text (str): 在单元格中显示的文本。
+        logger_obj (logger): 日志管理器实例。
+        source_description (str): 描述超链接来源，用于日志记录。
     """
-    if not directory_path.exists():
-        try:
-            os.makedirs(directory_path)
-            if logger_obj:
-                #logger_obj.info(f"已创建目录: {normalize_drive_letter(str(directory_path))}"
-                logger_obj.info(f"已创建目录: {normalize_drive_letter(str(directory_path))}") # 替换为 Loguru 的 info 方法
-            return True
-        except OSError as e:
-            if logger_obj:
-                #logger_obj.info(f"错误: 无法创建目录 {normalize_drive_letter(str(directory_path))}: {e}")#error
-                logger_obj.error(f"创建目录失败 {normalize_drive_letter(str(directory_path))}: {e}") # 替换为 Loguru 的 error 方法
-            print(f"错误: 无法创建文件夹 {directory_path}。错误: {e}")
-            return False
-    return True
-
-def copy_file(source_path: Path, destination_path: Path, logger_obj:logger) -> bool:
-    """
-    复制文件从源路径到目标路径。
-    增加对权限错误的捕获和提示。
-    """
-    if not source_path.exists():
-        if logger_obj:
-            logger_obj.error(f"错误: 源文件不存在，无法复制: {normalize_drive_letter(str(source_path))}")#error
-        print(f"错误: 源文件不存在，无法复制: {source_path}")
-        return False
-
     try:
-        shutil.copy2(str(source_path), str(destination_path)) 
-        if logger_obj:
-            logger_obj.info(f"已复制 '{normalize_drive_letter(str(source_path))}' 到 '{normalize_drive_letter(str(destination_path))}'")
-        return True
-    except PermissionError as e:
-        if logger_obj:
-            logger_obj.critical(
-                f"权限错误: 复制文件从 '{normalize_drive_letter(str(source_path))}' 到 '{normalize_drive_letter(str(destination_path))}' 失败: {e}. 请确保目标文件未被其他程序（如Excel）占用。")
-        print(f"错误: 权限拒绝！无法复制文件到 '{destination_path}'。请确保该文件未被其他程序（如Excel）打开。错误: {e}")
-        return False
-    except Exception as e:
-        if logger_obj:
-            logger_obj.error(f"错误: 复制文件从 '{normalize_drive_letter(str(source_path))}' 到 '{normalize_drive_letter(str(destination_path))}' 失败: {e}")#error
-        print(f"错误: 无法复制文件从 '{source_path}' 到 '{destination_path}'。错误: {e}")
-        return False
-
-def get_file_details(file_path: Path) -> Tuple[str, str]:
-    """
-    获取文件的名称（不含扩展名）和扩展名。
-    """
-    return file_path.stem, file_path.suffix
-
-# --- Excel Utilities ---
-def create_main_workbook():
-    """
-    创建主Excel工作簿，包含“匹配文件”和“未匹配文件”工作表。
-    """
-    wb = Workbook()
-    
-    # 移除默认创建的Sheet
-    if 'Sheet' in wb.sheetnames:
-        wb.remove(wb['Sheet'])
+        cell.value = display_text # 首先设置单元格显示文本
         
-    return wb
+        # 只有当 location 不为 None 且不为空时才设置超链接
+        if location: # 检查 location 是否有效
+            cell.hyperlink = location # 然后设置超链接目标
+            cell.font = HYPERLINK_FONT # 最后应用预定义的超链接字体样式
+            logger_obj.info(
+                f"成功设置超链接和样式 for '{display_text}' (Location: '{location}', Source: {source_description})"
+            )
+        else:
+            # 如果没有 location，确保不设置超链接，并移除可能的超链接样式
+            cell.hyperlink = None 
+            cell.font = Font(color="000000") # 恢复默认字体颜色，去除下划线
+            # 这条日志保留，因为仍然是提示没有设置超链接，但级别可以低一些
+            logger_obj.info(f"未为 '{display_text}' (Source: {source_description}) 设置超链接，因为location无效或为空。")
 
-def setup_excel_sheets(wb: Workbook) -> Tuple[Worksheet, Worksheet, Worksheet]:
+    except Exception as e:
+        logger_obj.error(
+            f"错误: 无法为单元格设置超链接或样式 for '{display_text}' (Location: '{location}', Source: {source_description}). 错误: {e}"
+        )
+        # 即使出错，也要确保单元格值被设置，即使没有超链接样式
+        cell.value = display_text
+
+
+
+# --- NEW FUNCTION: Set Fixed Column Widths for a Worksheet ---
+def set_fixed_column_widths(worksheet: Worksheet, width: int, logger_obj):
     """
-    设置Excel工作表及其标题行。
+    为给定工作表的所有列设置固定宽度。
+    Args:
+        worksheet (Worksheet): openpyxl 工作表对象。
+        width (int): 要设置的列宽。
+        logger_obj (logger): 日志管理器实例。
     """
-    # 匹配文件工作表
-    ws_matched = wb.create_sheet("匹配文件", 0) # 插入到最前面
-    ws_matched.append([
-        "文件夹路径", "文件绝对路径", "文件链接", "文件扩展名", "TXT文件绝对路径",
-        "TXT文件内容", "清洗后内容", "内容长度", "提示词类型", "找到TXT"
-    ])
+    try:
+        for col_idx in range(1, worksheet.max_column + 1): # 从1开始遍历所有列
+            column_letter = get_column_letter(col_idx)
+            worksheet.column_dimensions[column_letter].width = width
+        logger_obj.info(f"已为工作表 '{worksheet.title}' 设置所有列宽度为 {width}.") # 替换为 Loguru 的 info 方法，to_file_only 行为 Loguru 默认在 setup 时配置
+    except Exception as e:
+        #logger_obj.info(f"错误: 无法为工作表 '{worksheet.title}' 设置列宽: {e}")#error
+        logger_obj.error(f"错误: 无法为工作表 '{worksheet.title}' 设置列宽: {e}") # 替换为 Loguru 的 error 方法
+        print(f"错误: 无法为工作表 '{worksheet.title}' 设置列宽. 错误: {e}")
 
-    # 未匹配文件工作表
-    ws_no_txt = wb.create_sheet("未匹配文件", 1) # 插入到第二个
-    ws_no_txt.append([
-        "文件夹路径", "文件绝对路径", "文件链接", "文件扩展名", "找到TXT"
-    ])
 
-    # Tag词频统计工作表
-    ws_tag_frequency = wb.create_sheet("Tag词频统计", 2) # 插入到第三个
-    ws_tag_frequency.append(["Tag", "出现次数"])
-
-    return ws_matched, ws_no_txt, ws_tag_frequency
-
+# Scanner.py
+# ... (原有导入不变)
+from typing import List, Dict, Any, Tuple # 确保这些类型提示可用
 # --- Scanner ---
 def scan_files_and_extract_data(
     base_folder_path: Path,
     ws_matched: Worksheet,
     ws_no_txt: Worksheet,
-    logger_obj: logger#原logger
+    logger_obj#原logger
 
 ) -> Tuple[int, int, int, Dict[str, int]]:
     """
@@ -640,36 +638,3 @@ def scan_files_and_extract_data(
 
     # 修正这里，返回 found_txt_count 和 not_found_txt_count
     return total_files_scanned, found_txt_count, not_found_txt_count, tag_counts
-
-# --- New Function: Read Batch Paths ---
-def read_batch_paths(batch_file_path: Path, logger_obj: logger#原logger
-) -> List[Path]:
-    """
-    从 batchPath.txt 文件中读取需要扫描的文件夹路径列表。
-    Args:
-        batch_file_path (Path): batchPath.txt 文件的路径。
-        logger_obj (logger): 日志管理器实例。
-    Returns:
-        List[Path]: 文件夹路径的列表。
-    """
-    folders = []
-    if not batch_file_path.exists():
-        logger_obj.error(f"错误: 批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 不存在。")#error
-        print(f"错误: 批量路径文件 '{batch_file_path}' 不存在。")
-        return folders
-    try:
-        with open(batch_file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                path_str = line.strip()
-                if path_str and not path_str.startswith('#'): # 忽略空行和注释行
-                    folder_path = Path(path_str)
-                    if validate_directory(folder_path, logger_obj):
-                        folders.append(folder_path)
-                    else:
-                        logger_obj.warning(f"警告: 批量路径文件中的路径无效或不存在，已跳过: {normalize_drive_letter(str(folder_path))}")#warning
-        if not folders:
-            logger_obj.warning(f"警告: 批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 中没有找到有效的文件夹路径。")#warning
-    except Exception as e:
-        logger_obj.critical(f"错误: 读取批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 失败: {e}")#critical
-        print(f"错误: 读取批量路径文件 '{batch_file_path}' 失败。错误: {e}")
-    return folders

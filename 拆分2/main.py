@@ -12,13 +12,29 @@ from collections import defaultdict
 from typing import Tuple, Dict, Optional, Set, List, Any
 import hashlib
 
+# 注入超链接样式和列宽大小
+#from excel_utils import set_hyperlink_and_style,set_fixed_column_widths
 
 # openpyxl 相关的导入
 from openpyxl import Workbook, load_workbook
-from openpyxl.utils import get_column_letter
+#from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill
 from openpyxl.styles.colors import Color
 from openpyxl.worksheet.worksheet import Worksheet
+
+# 从 my_logger 导入 setup_logger 和 _error_log_file_path，以及 normalize_drive_letter
+from my_logger import setup_logger, _error_log_file_path, normalize_drive_letter
+
+# 从 loguru 导入 logger
+from loguru import logger
+
+
+# --- 主要改动点 START ---
+# 从 excel_utils 导入 set_hyperlink_and_style, set_fixed_column_widths 和 FIXED_COLUMN_WIDTH
+#from excel_utils import set_hyperlink_and_style, set_fixed_column_widths, FIXED_COLUMN_WIDTH
+# 从 execution_history 导入 HistoryManager
+#from execution_history import HistoryManager
+# --- 主要改动点 END ---
 
 # 从 utils 导入除了 normalize_drive_letter 的其他常量和函数
 from utils import (
@@ -65,7 +81,7 @@ import time # 确保导入了time模块
 
 # ... (其他函数定义) ...
 
-def open_output_files_automatically(file_paths: List[Path], logger_obj: logger):
+def open_output_files_automatically(file_paths: List[Path], logger_obj):
     """
     根据用户设置自动打开生成的输出文件（Excel和Log文件）。
     Args:
