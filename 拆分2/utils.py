@@ -22,10 +22,14 @@ from openpyxl.worksheet.worksheet import Worksheet # 用于类型提示
 
 # 移除 normalize_drive_letter 函数定义（因为它已移至 my_logger.py）
 
-# 新增：从 my_logger 模块导入 LogManager (如果 utils.py 中的函数需要 LogManager 作为类型提示)
-# 如果 utils.py 中没有函数直接使用 LogManager 作为类型提示，可以移除这行
-from my_logger import LogManager 
+# 新增：从 my_logger 模块导入 logger (如果 utils.py 中的函数需要 logger 作为类型提示)
+# 如果 utils.py 中没有函数直接使用 logger 作为类型提示，可以移除这行
+# from my_logger import logger 
 
+from loguru import logger # 新增行 1
+
+# 新增：从 my_logger 导入 normalize_drive_letter
+from my_logger import normalize_drive_letter # 新增行 2
 # --- Configuration ---
 HISTORY_FOLDER_NAME = "运行历史记录"
 HISTORY_EXCEL_NAME = "scan_history.xlsx"
@@ -89,27 +93,27 @@ def generate_folder_prefix(folder_path: Path) -> str:
         # 否则，使用文件夹名，并限制长度，防止文件名过长
         return folder_name[:30] # 限制为30个字符，避免过长
 
-# --- LogManager Class ---
-class LogManager:
+# --- logger Class ---
+# class logger:
     """
     负责程序的日志记录。
     """
     def __init__(self, log_directory: Path, log_file_name: str = None, 
-                 error_log_manager: Optional['LogManager'] = None,
-                 is_error_log_manager: bool = False): # 新增参数：标记是否为错误日志管理器
+                 error_logger_obj: Optional['logger'] = None,
+                 is_error_logger_obj: bool = False): # 新增参数：标记是否为错误日志管理器
         self.log_directory = log_directory
         self.log_file_path = None
         self.file_handle = None
-        self.error_log_manager = error_log_manager
-        self.is_error_log_manager = is_error_log_manager # 新增：标记是否为错误日志管理器
+        self.error_logger_obj = error_logger_obj
+        self.is_error_logger_obj = is_error_logger_obj # 新增：标记是否为错误日志管理器
         self._is_initialized = False # 新增：标记日志文件是否已实际打开
 
-        # 尝试创建日志目录（对于所有LogManager实例，目录都应该存在）
+        # 尝试创建日志目录（对于所有logger实例，目录都应该存在）
         try:
             if not self.log_directory.exists():
                 os.makedirs(self.log_directory)
                 # 只有非错误日志管理器才打印创建目录的INFO日志到控制台
-                if not self.is_error_log_manager:
+                if not self.is_error_logger_obj:
                     print(f"已创建日志文件夹: {normalize_drive_letter(str(self.log_directory))}")
                     # 对于主日志，可以在目录创建后立即写入日志，但不使用to_error_log避免循环
                     self.write_log(f"已创建日志文件夹: {normalize_drive_letter(str(self.log_directory))}", level="INFO", to_error_log=False)
@@ -136,7 +140,7 @@ class LogManager:
                 self.file_handle = open(self.log_file_path, 'a', encoding='utf-8')
                 self._is_initialized = True # 标记为已初始化
                 # 只有非错误日志管理器才打印文件打开的INFO日志到控制台和自身文件
-                if not self.is_error_log_manager:
+                if not self.is_error_logger_obj:
                     print(f"日志文件已打开: {normalize_drive_letter(str(self.log_file_path))}")
                     # 避免写入自身，否则会进入无限循环
                     self.file_handle.write(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] 日志文件已打开: {normalize_drive_letter(str(self.log_file_path))}\n")
@@ -155,31 +159,31 @@ class LogManager:
             message (str): 日志消息。
             level (str): 日志级别 (INFO, WARNING, ERROR, CRITICAL).
             to_file_only (bool): 如果为True，则只写入文件，不打印到控制台。
-            to_error_log (bool): 如果为True且存在error_log_manager，则将WARNING/ERROR/CRITICAL日志写入错误日志。
+            to_error_log (bool): 如果为True且存在error_logger_obj，则将WARNING/ERROR/CRITICAL日志写入错误日志。
         """
         timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
         log_message = f"{timestamp} [{level}] {message}"
         
         # 将WARNING, ERROR, CRITICAL 级别的日志写入单独的错误日志文件
         # 并且确保不是错误日志管理器自己在给自己写（避免循环）
-        if to_error_log and self.error_log_manager and self.error_log_manager is not self and level in ["WARNING", "ERROR", "CRITICAL"]:
+        if to_error_log and self.error_logger_obj and self.error_logger_obj is not self and level in ["WARNING", "ERROR", "CRITICAL"]:
             # 只有当错误日志管理器接收到实际的错误或警告时才触发其文件的打开和写入
-            self.error_log_manager._ensure_log_file_open() # 确保错误日志文件已打开
-            if self.error_log_manager.file_handle: # 再次检查句柄是否有效
+            self.error_logger_obj._ensure_log_file_open() # 确保错误日志文件已打开
+            if self.error_logger_obj.file_handle: # 再次检查句柄是否有效
                 try:
-                    self.error_log_manager.file_handle.write(log_message + "\n")
-                    self.error_log_manager.file_handle.flush()
+                    self.error_logger_obj.file_handle.write(log_message + "\n")
+                    self.error_logger_obj.file_handle.flush()
                 except Exception as e:
-                    # 如果错误日志管理器写入失败，则打印到控制台，不应再次尝试通过LogManager写入
-                    print(f"关键错误: 写入错误日志文件 {normalize_drive_letter(str(self.error_log_manager.log_file_path))} 失败. 消息: {message}. 错误: {e}")
+                    # 如果错误日志管理器写入失败，则打印到控制台，不应再次尝试通过logger写入
+                    print(f"关键错误: 写入错误日志文件 {normalize_drive_letter(str(self.error_logger_obj.log_file_path))} 失败. 消息: {message}. 错误: {e}")
 
-        # 对于当前LogManager实例，只有在文件被实际打开后才写入文件
+        # 对于当前logger实例，只有在文件被实际打开后才写入文件
         # 或者如果是错误日志管理器，并且是WARNING/ERROR/CRITICAL级别才尝试打开并写入
         should_write_to_this_file = False
-        if not self.is_error_log_manager: # 对于主日志管理器和扫描日志管理器
+        if not self.is_error_logger_obj: # 对于主日志管理器和扫描日志管理器
             self._ensure_log_file_open() # 确保文件已打开
             should_write_to_this_file = True
-        elif self.is_error_log_manager and level in ["WARNING", "ERROR", "CRITICAL"]: # 对于错误日志管理器，只有这些级别才写入
+        elif self.is_error_logger_obj and level in ["WARNING", "ERROR", "CRITICAL"]: # 对于错误日志管理器，只有这些级别才写入
             self._ensure_log_file_open() # 确保文件已打开
             should_write_to_this_file = True
 
@@ -211,7 +215,7 @@ class LogManager:
                 self.file_handle = None
                 self._is_initialized = False # 重置初始化状态
                 # 只有非错误日志管理器才打印关闭信息
-                if not self.is_error_log_manager:
+                if not self.is_error_logger_obj:
                     print(f"日志文件已关闭: {normalize_drive_letter(str(self.log_file_path))}")
             except Exception as e:
                 print(f"关闭日志文件 {normalize_drive_letter(str(self.log_file_path))} 失败. 错误: {e}")
@@ -229,7 +233,7 @@ def set_hyperlink_and_style(
     cell, 
     location: Optional[str], # location 现在可以是 Optional[str]
     display_text: str, 
-    log_manager: LogManager, 
+    logger_obj: logger, 
     source_description: str = "未知源"
 ):
     """
@@ -238,7 +242,7 @@ def set_hyperlink_and_style(
         cell: openpyxl 单元格对象。
         location (Optional[str]): 超链接指向的实际位置（文件路径或URL）。如果为None或空字符串，则不设置超链接。
         display_text (str): 在单元格中显示的文本。
-        log_manager (LogManager): 日志管理器实例。
+        logger_obj (logger): 日志管理器实例。
         source_description (str): 描述超链接来源，用于日志记录。
     """
     try:
@@ -248,7 +252,7 @@ def set_hyperlink_and_style(
         if location: # 检查 location 是否有效
             cell.hyperlink = location # 然后设置超链接目标
             cell.font = HYPERLINK_FONT # 最后应用预定义的超链接字体样式
-            log_manager.write_log(
+            logger_obj.info(
                 f"成功设置超链接和样式 for '{display_text}' (Location: '{location}', Source: {source_description})", 
                 level="DEBUG", to_file_only=True
             )
@@ -257,35 +261,36 @@ def set_hyperlink_and_style(
             cell.hyperlink = None 
             cell.font = Font(color="000000") # 恢复默认字体颜色，去除下划线
             # 这条日志保留，因为仍然是提示没有设置超链接，但级别可以低一些
-            log_manager.write_log(
+            logger_obj.info(
                 f"未为 '{display_text}' (Source: {source_description}) 设置超链接，因为location无效或为空。", 
                 level="INFO", to_file_only=True
             )
 
     except Exception as e:
-        log_manager.write_log(
-            f"错误: 无法为单元格设置超链接或样式 for '{display_text}' (Location: '{location}', Source: {source_description}). 错误: {e}", 
-            level="ERROR"
+        logger_obj.error(
+            f"错误: 无法为单元格设置超链接或样式 for '{display_text}' (Location: '{location}', Source: {source_description}). 错误: {e}"
         )
         # 即使出错，也要确保单元格值被设置，即使没有超链接样式
         cell.value = display_text
 
 # --- NEW FUNCTION: Set Fixed Column Widths for a Worksheet ---
-def set_fixed_column_widths(worksheet: Worksheet, width: int, log_manager: LogManager):
+def set_fixed_column_widths(worksheet: Worksheet, width: int, logger_obj: logger):
     """
     为给定工作表的所有列设置固定宽度。
     Args:
         worksheet (Worksheet): openpyxl 工作表对象。
         width (int): 要设置的列宽。
-        log_manager (LogManager): 日志管理器实例。
+        logger_obj (logger): 日志管理器实例。
     """
     try:
         for col_idx in range(1, worksheet.max_column + 1): # 从1开始遍历所有列
             column_letter = get_column_letter(col_idx)
             worksheet.column_dimensions[column_letter].width = width
-        log_manager.write_log(f"已为工作表 '{worksheet.title}' 设置所有列宽度为 {width}.", level="INFO", to_file_only=True)
+        #logger_obj.info(f"已为工作表 '{worksheet.title}' 设置所有列宽度为 {width}.", level="INFO", to_file_only=True)
+        logger_obj.info(f"已为工作表 '{worksheet.title}' 设置所有列宽度为 {width}.") # 替换为 Loguru 的 info 方法，to_file_only 行为 Loguru 默认在 setup 时配置
     except Exception as e:
-        log_manager.write_log(f"错误: 无法为工作表 '{worksheet.title}' 设置列宽: {e}", level="ERROR")
+        #logger_obj.info(f"错误: 无法为工作表 '{worksheet.title}' 设置列宽: {e}")#error
+        logger_obj.error(f"错误: 无法为工作表 '{worksheet.title}' 设置列宽: {e}") # 替换为 Loguru 的 error 方法
         print(f"错误: 无法为工作表 '{worksheet.title}' 设置列宽. 错误: {e}")
 
 # --- HistoryManager (Excel Version) ---
@@ -293,9 +298,9 @@ class HistoryManager:
     """
     负责程序扫描历史记录的Excel文件存储。
     """
-    def __init__(self, history_file_path: Path, log_manager: LogManager):
+    def __init__(self, history_file_path: Path, logger_obj: logger):
         self.history_file_path = history_file_path
-        self.log_manager = log_manager
+        self.logger_obj = logger_obj
         self.history_data: List[Dict[str, Any]] = [] # 存储内存中的历史记录
         self._load_history_from_excel()
 
@@ -305,7 +310,8 @@ class HistoryManager:
         """
         self.history_data = []
         if not self.history_file_path.exists():
-            self.log_manager.write_log(f"历史记录Excel文件不存在: {normalize_drive_letter(str(self.history_file_path))}. 将创建新文件。", level="INFO")
+            #self.logger_obj.info(f"历史记录Excel文件不存在: {normalize_drive_letter(str(self.history_file_path))}. 将创建新文件。"
+            self.logger_obj.info(f"历史记录Excel文件不存在: {normalize_drive_letter(str(self.history_file_path))}. 将创建新文件。") # 替换为 Loguru 的 info 方法
             return
 
         try:
@@ -314,7 +320,7 @@ class HistoryManager:
                 ws = wb["扫描历史"]
                 headers = [cell.value for cell in ws[1]] # 获取表头
                 if not headers:
-                    self.log_manager.write_log(f"历史记录Excel文件 '{normalize_drive_letter(str(self.history_file_path))}' 的 '扫描历史' 工作表为空，无历史记录可加载。", level="WARNING")
+                    self.logger_obj.warning(f"历史记录Excel文件 '{normalize_drive_letter(str(self.history_file_path))}' 的 '扫描历史' 工作表为空，无历史记录可加载。")#warning
                     return
 
                 # 确保表头符合预期，避免因旧文件格式导致的问题
@@ -331,7 +337,7 @@ class HistoryManager:
                 ]
                 # 简化检查，只需要检查前5列和两个绝对路径列是否存在，因为超链接列是动态生成的
                 if not all(h in headers for h in expected_headers[:6] + [expected_headers[7]]): # 检查前6个和第8个（结果XLSX绝对路径）
-                    self.log_manager.write_log(f"历史记录Excel文件 '{normalize_drive_letter(str(self.history_file_path))}' 表头不匹配预期，可能无法完全加载所有历史记录。", level="WARNING")
+                    self.logger_obj.warning(f"历史记录Excel文件 '{normalize_drive_letter(str(self.history_file_path))}' 表头不匹配预期，可能无法完全加载所有历史记录。")#warning
                     # 继续尝试加载，但可能不完整
 
                 for row_idx in range(2, ws.max_row + 1): # 从第二行开始读取数据
@@ -354,9 +360,9 @@ class HistoryManager:
                         'log_file_abs_path': Path(entry.get("Log文件绝对路径")) if entry.get("Log文件绝对路径") else None,
                         'result_xlsx_abs_path': Path(entry.get("结果XLSX文件绝对路径")) if entry.get("结果XLSX文件绝对路径") else None
                     })
-            self.log_manager.write_log(f"成功从历史记录Excel文件加载 {len(self.history_data)} 条历史记录。", level="INFO")
+            self.logger_obj.info(f"成功从历史记录Excel文件加载 {len(self.history_data)} 条历史记录。")
         except Exception as e:
-            self.log_manager.write_log(f"错误: 从历史记录Excel文件 {normalize_drive_letter(str(self.history_file_path))} 加载历史记录失败: {e}", level="ERROR")
+            self.logger_obj.error(f"错误: 从历史记录Excel文件 {normalize_drive_letter(str(self.history_file_path))} 加载历史记录失败: {e}")#error
             self.history_data = [] # 加载失败则清空内存数据，避免脏数据
 
     def add_history_entry(self, folder_path: Path, total_scanned: int, found_txt_count: int,
@@ -375,7 +381,7 @@ class HistoryManager:
             'result_xlsx_abs_path': result_file_path
         }
         self.history_data.append(entry)
-        self.log_manager.write_log(f"历史记录成功添加至内存: 文件夹'{folder_path.name}'", level="INFO")
+        self.logger_obj.info(f"历史记录成功添加至内存: 文件夹'{folder_path.name}'")
 
     def save_history_to_excel(self) -> bool:
         """
@@ -383,22 +389,22 @@ class HistoryManager:
         Returns:
             bool: 如果保存成功返回True，否则返回False。
         """
-        self.log_manager.write_log(f"开始将内存中的历史记录保存到Excel: {normalize_drive_letter(str(self.history_file_path))}", level="INFO")
+        self.logger_obj.info(f"开始将内存中的历史记录保存到Excel: {normalize_drive_letter(str(self.history_file_path))}")
 
         # 尝试删除旧的历史Excel文件，以便重新写入
         if self.history_file_path.exists():
             try:
                 os.remove(str(self.history_file_path))
-                self.log_manager.write_log(f"已删除旧的历史记录Excel文件: {normalize_drive_letter(str(self.history_file_path))}", level="INFO")
+                self.logger_obj.info(f"已删除旧的历史记录Excel文件: {normalize_drive_letter(str(self.history_file_path))}")
             except PermissionError as e: # 明确捕获权限错误
-                self.log_manager.write_log(f"警告: 无法删除旧的历史记录Excel文件 {normalize_drive_letter(str(self.history_file_path))}. 可能文件被占用. 错误: {e}", level="WARNING")
+                self.logger_obj.warning(f"警告: 无法删除旧的历史记录Excel文件 {normalize_drive_letter(str(self.history_file_path))}. 可能文件被占用. 错误: {e}")#warning
                 print(f"警告: 无法删除旧的历史记录Excel文件 {self.history_file_path}. 可能文件被占用. 错误: {e}")
-                self.log_manager.write_log("无法覆盖旧的历史文件，历史记录将无法保存。请关闭Excel中打开的历史文件。", level="CRITICAL")
+                self.logger_obj.critical("无法覆盖旧的历史文件，历史记录将无法保存。请关闭Excel中打开的历史文件。")#critical
                 return False # 删除失败，返回False
             except Exception as e:
-                self.log_manager.write_log(f"警告: 删除旧的历史记录Excel文件时发生未知错误 {normalize_drive_letter(str(self.history_file_path))}. 错误: {e}", level="WARNING")
+                self.logger_obj.warning(f"警告: 删除旧的历史记录Excel文件时发生未知错误 {normalize_drive_letter(str(self.history_file_path))}. 错误: {e}")#warning
                 print(f"警告: 删除旧的历史记录Excel文件时发生未知错误 {self.history_file_path}. 错误: {e}")
-                self.log_manager.write_log("删除旧文件失败，历史记录将无法保存。", level="CRITICAL")
+                self.logger_obj.critical("删除旧文件失败，历史记录将无法保存。")#critical
                 return False # 删除失败，返回False
 
 
@@ -468,7 +474,7 @@ class HistoryManager:
                     log_link_cell, 
                     log_link_location, # 传入可能为None的location
                     log_link_display_text, 
-                    self.log_manager, 
+                    self.logger_obj, 
                     source_description=f"历史记录Log文件 (行: {new_row_idx})"
                 )
 
@@ -478,82 +484,85 @@ class HistoryManager:
                     result_link_cell, 
                     result_link_location, # 传入可能为None的location
                     result_link_display_text, 
-                    self.log_manager, 
+                    self.logger_obj, 
                     source_description=f"历史记录结果XLSX文件 (行: {new_row_idx})"
                 )
             
             # 设置所有列宽
-            set_fixed_column_widths(ws, FIXED_COLUMN_WIDTH, self.log_manager)
+            set_fixed_column_widths(ws, FIXED_COLUMN_WIDTH, self.logger_obj)
             
             wb.save(str(self.history_file_path))
-            self.log_manager.write_log(f"成功将历史记录保存到Excel: {normalize_drive_letter(str(self.history_file_path))}", level="INFO")
+            self.logger_obj.info(f"成功将历史记录保存到Excel: {normalize_drive_letter(str(self.history_file_path))}")
             return True
 
         except Exception as e:
-            self.log_manager.write_log(f"错误: 将历史记录保存到Excel失败 {normalize_drive_letter(str(self.history_file_path))}: {e}", level="ERROR")
+            self.logger_obj.error(f"错误: 将历史记录保存到Excel失败 {normalize_drive_letter(str(self.history_file_path))}: {e}")#error
             print(f"错误: 将历史记录保存到Excel失败 {self.history_file_path}. 错误: {e}")
             return False
 
 # --- File Operations ---
-def validate_directory(path: Path, log_manager: Optional[LogManager]) -> bool:
+def validate_directory(path: Path, logger_obj: logger) -> bool:
     """
     验证给定的路径是否是一个存在的目录。
     """
     if not path.is_dir():
-        if log_manager:
-            log_manager.write_log(f"验证失败: 目录不存在或不是一个目录: {normalize_drive_letter(str(path))}", level="WARNING")
+        if logger_obj:
+            logger_obj.warning(f"验证失败: 目录不存在或不是一个目录: {normalize_drive_letter(str(path))}")#warning
         return False
     return True
 
-def create_directory_if_not_exists(directory_path: Path, log_manager: Optional[LogManager]) -> bool:
+# def create_directory_if_not_exists(directory_path: Path, logger_obj: Optional[logger]) -> bool:
+def create_directory_if_not_exists(directory_path: Path, logger_obj) -> bool: # 更改参数名为 logger_obj，并移除 logger 类型提示
     """
     如果指定目录不存在，则创建它。
     Args:
         directory_path (Path): 要创建的目录路径。
-        log_manager (Optional[LogManager]): 日志管理器实例，可选。
+        logger_obj (Optional[logger]): 日志管理器实例，可选。
     Returns:
         bool: 如果目录存在或成功创建，则返回True；否则返回False。
     """
     if not directory_path.exists():
         try:
             os.makedirs(directory_path)
-            if log_manager:
-                log_manager.write_log(f"已创建目录: {normalize_drive_letter(str(directory_path))}", level="INFO")
+            if logger_obj:
+                #logger_obj.info(f"已创建目录: {normalize_drive_letter(str(directory_path))}"
+                logger_obj.info(f"已创建目录: {normalize_drive_letter(str(directory_path))}") # 替换为 Loguru 的 info 方法
             return True
         except OSError as e:
-            if log_manager:
-                log_manager.write_log(f"错误: 无法创建目录 {normalize_drive_letter(str(directory_path))}: {e}", level="ERROR")
+            if logger_obj:
+                #logger_obj.info(f"错误: 无法创建目录 {normalize_drive_letter(str(directory_path))}: {e}")#error
+                logger_obj.error(f"创建目录失败 {normalize_drive_letter(str(directory_path))}: {e}") # 替换为 Loguru 的 error 方法
             print(f"错误: 无法创建文件夹 {directory_path}。错误: {e}")
             return False
     return True
 
-def copy_file(source_path: Path, destination_path: Path, log_manager: Optional[LogManager]) -> bool:
+def copy_file(source_path: Path, destination_path: Path, logger_obj:logger) -> bool:
     """
     复制文件从源路径到目标路径。
     增加对权限错误的捕获和提示。
     """
     if not source_path.exists():
-        if log_manager:
-            log_manager.write_log(f"错误: 源文件不存在，无法复制: {normalize_drive_letter(str(source_path))}", level="ERROR")
+        if logger_obj:
+            logger_obj.error(f"错误: 源文件不存在，无法复制: {normalize_drive_letter(str(source_path))}")#error
         print(f"错误: 源文件不存在，无法复制: {source_path}")
         return False
 
     try:
         shutil.copy2(str(source_path), str(destination_path)) 
-        if log_manager:
-            log_manager.write_log(f"已复制 '{normalize_drive_letter(str(source_path))}' 到 '{normalize_drive_letter(str(destination_path))}'", level="INFO")
+        if logger_obj:
+            logger_obj.info(f"已复制 '{normalize_drive_letter(str(source_path))}' 到 '{normalize_drive_letter(str(destination_path))}'")
         return True
     except PermissionError as e:
-        if log_manager:
-            log_manager.write_log(
+        if logger_obj:
+            logger_obj.info(
                 f"权限错误: 复制文件从 '{normalize_drive_letter(str(source_path))}' 到 '{normalize_drive_letter(str(destination_path))}' 失败: {e}. 请确保目标文件未被其他程序（如Excel）占用。", 
                 level="CRITICAL"
             )
         print(f"错误: 权限拒绝！无法复制文件到 '{destination_path}'。请确保该文件未被其他程序（如Excel）打开。错误: {e}")
         return False
     except Exception as e:
-        if log_manager:
-            log_manager.write_log(f"错误: 复制文件从 '{normalize_drive_letter(str(source_path))}' 到 '{normalize_drive_letter(str(destination_path))}' 失败: {e}", level="ERROR")
+        if logger_obj:
+            logger_obj.error(f"错误: 复制文件从 '{normalize_drive_letter(str(source_path))}' 到 '{normalize_drive_letter(str(destination_path))}' 失败: {e}")#error
         print(f"错误: 无法复制文件从 '{source_path}' 到 '{destination_path}'。错误: {e}")
         return False
 
@@ -695,7 +704,8 @@ def scan_files_and_extract_data(
     base_folder_path: Path,
     ws_matched: Worksheet,
     ws_no_txt: Worksheet,
-    log_manager: LogManager
+    logger_obj: logger#原logger
+
 ) -> Tuple[int, int, int, Dict[str, int]]:
     """
     扫描指定文件夹下的文件，查找匹配的TXT文件，提取数据并写入Excel。
@@ -715,7 +725,7 @@ def scan_files_and_extract_data(
     all_extensions: Set[str] = set()
     skipped_extensions: Set[str] = set()
 
-    log_manager.write_log(f"开始扫描文件夹: {normalize_drive_letter(str(base_folder_path))}", level="INFO")
+    logger_obj.info(f"开始扫描文件夹: {normalize_drive_letter(str(base_folder_path))}")
 
     try:
         for root_str, dirs, files in os.walk(base_folder_path):
@@ -731,7 +741,7 @@ def scan_files_and_extract_data(
                 should_skip_current_path = True
 
             if should_skip_current_path:
-                log_manager.write_log(f"跳过扫描文件夹及其子文件夹，因为它包含要跳过的名称: {normalize_drive_letter(str(root))}", level="INFO", to_file_only=True)
+                logger_obj.info(f"跳过扫描文件夹及其子文件夹，因为它包含要跳过的名称: {normalize_drive_letter(str(root))}", level="INFO", to_file_only=True)
                 dirs[:] = [] 
                 continue 
 
@@ -763,7 +773,7 @@ def scan_files_and_extract_data(
 
                 else:
                     # 这条日志保留，因为是文件系统层面的缺失，但级别可以低一些
-                    log_manager.write_log(f"文件不存在，无法生成有效超链接: {normalize_drive_letter(str(file_abs_path))}", level="INFO", to_file_only=True) 
+                    logger_obj.info(f"文件不存在，无法生成有效超链接: {normalize_drive_letter(str(file_abs_path))}", level="INFO", to_file_only=True) 
                     file_link_text = f"文件不存在: {file_abs_path.name}" # 提示文件不存在
 
                 txt_content = ""
@@ -791,12 +801,12 @@ def scan_files_and_extract_data(
                                         tag_counts[tag.strip().lower()] += 1
                                 break
                     except Exception as e:
-                        log_manager.write_log(f"错误: 读取或处理TXT文件 {normalize_drive_letter(str(txt_file_path))} 失败: {e}", level="ERROR")
+                        logger_obj.error(f"错误: 读取或处理TXT文件 {normalize_drive_letter(str(txt_file_path))} 失败: {e}")#error
                         txt_content = f"Error reading TXT: {e}"
                         found_txt_flag = '否 (读取错误)'
                         not_found_txt_count += 1
                 else:
-                    log_manager.write_log(f"未找到匹配的TXT文件: {normalize_drive_letter(str(file_path))}", level="INFO", to_file_only=True)
+                    logger_obj.info(f"未找到匹配的TXT文件: {normalize_drive_letter(str(file_path))}", level="INFO", to_file_only=True)
                     not_found_txt_count += 1
                 
                 current_row_data = [
@@ -819,7 +829,7 @@ def scan_files_and_extract_data(
                         link_cell, 
                         file_link_location, # 传入可能为None的location
                         file_link_text, # 传入已准备好的显示文本
-                        log_manager, 
+                        logger_obj, 
                         source_description=f"匹配文件 (行: {ws_matched.max_row})"
                     )
 
@@ -837,43 +847,44 @@ def scan_files_and_extract_data(
                         link_cell, 
                         file_link_location, # 传入可能为None的location
                         file_link_text, # 传入已准备好的显示文本
-                        log_manager, 
+                        logger_obj, 
                         source_description=f"未匹配文件 (行: {ws_no_txt.max_row})"
                     )
 
     except Exception as e:
-        log_manager.write_log(f"致命错误: 扫描文件过程中发生意外错误 for folder {normalize_drive_letter(str(base_folder_path))}: {e}", level="CRITICAL")
+        logger_obj.critical(f"致命错误: 扫描文件过程中发生意外错误 for folder {normalize_drive_letter(str(base_folder_path))}: {e}")#critical
         print(f"致命错误: 扫描文件过程中发生意外错误 for folder {base_folder_path}: {e}")
     
-    log_manager.write_log(f"文件夹 {normalize_drive_letter(str(base_folder_path))} 扫描完成. 总文件数: {total_files_scanned}, 找到TXT: {found_txt_count}, 未找到TXT: {not_found_txt_count}", level="INFO")
+    logger_obj.info(f"文件夹 {normalize_drive_letter(str(base_folder_path))} 扫描完成. 总文件数: {total_files_scanned}, 找到TXT: {found_txt_count}, 未找到TXT: {not_found_txt_count}")
     
-    log_manager.write_log(f"\n--- 扫描文件类型概览 ---", level="INFO")
+    logger_obj.info(f"\n--- 扫描文件类型概览 ---")
     if all_extensions:
         for ext in sorted(list(all_extensions)):
             status = "已处理"
             if ext in skipped_extensions:
                 status = "已跳过"
-            log_manager.write_log(f"文件扩展名: '{ext}' - 状态: {status}", level="INFO")
+            logger_obj.info(f"文件扩展名: '{ext}' - 状态: {status}")
     else:
-        log_manager.write_log("未扫描到任何文件扩展名。", level="INFO")
-    log_manager.write_log(f"--- 文件类型概览结束 ---\n", level="INFO")
+        logger_obj.info("未扫描到任何文件扩展名。")
+    logger_obj.info(f"--- 文件类型概览结束 ---\n")
 
     # 修正这里，返回 found_txt_count 和 not_found_txt_count
     return total_files_scanned, found_txt_count, not_found_txt_count, tag_counts
 
 # --- New Function: Read Batch Paths ---
-def read_batch_paths(batch_file_path: Path, log_manager: LogManager) -> List[Path]:
+def read_batch_paths(batch_file_path: Path, logger_obj: logger#原logger
+) -> List[Path]:
     """
     从 batchPath.txt 文件中读取需要扫描的文件夹路径列表。
     Args:
         batch_file_path (Path): batchPath.txt 文件的路径。
-        log_manager (LogManager): 日志管理器实例。
+        logger_obj (logger): 日志管理器实例。
     Returns:
         List[Path]: 文件夹路径的列表。
     """
     folders = []
     if not batch_file_path.exists():
-        log_manager.write_log(f"错误: 批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 不存在。", level="ERROR")
+        logger_obj.error(f"错误: 批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 不存在。")#error
         print(f"错误: 批量路径文件 '{batch_file_path}' 不存在。")
         return folders
     try:
@@ -882,13 +893,13 @@ def read_batch_paths(batch_file_path: Path, log_manager: LogManager) -> List[Pat
                 path_str = line.strip()
                 if path_str and not path_str.startswith('#'): # 忽略空行和注释行
                     folder_path = Path(path_str)
-                    if validate_directory(folder_path, log_manager):
+                    if validate_directory(folder_path, logger_obj):
                         folders.append(folder_path)
                     else:
-                        log_manager.write_log(f"警告: 批量路径文件中的路径无效或不存在，已跳过: {normalize_drive_letter(str(folder_path))}", level="WARNING")
+                        logger_obj.warning(f"警告: 批量路径文件中的路径无效或不存在，已跳过: {normalize_drive_letter(str(folder_path))}")#warning
         if not folders:
-            log_manager.write_log(f"警告: 批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 中没有找到有效的文件夹路径。", level="WARNING")
+            logger_obj.warning(f"警告: 批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 中没有找到有效的文件夹路径。")#warning
     except Exception as e:
-        log_manager.write_log(f"错误: 读取批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 失败: {e}", level="CRITICAL")
+        logger_obj.critical(f"错误: 读取批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 失败: {e}")#critical
         print(f"错误: 读取批量路径文件 '{batch_file_path}' 失败。错误: {e}")
     return folders
