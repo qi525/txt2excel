@@ -93,6 +93,142 @@ def generate_folder_prefix(folder_path: Path) -> str:
         # 否则，使用文件夹名，并限制长度，防止文件名过长
         return folder_name[:30] # 限制为30个字符，避免过长
 
+# --- logger Class ---
+# class logger:
+    """
+    负责程序的日志记录。
+    """
+    def __init__(self, log_directory: Path, log_file_name: str = None, 
+                 error_logger_obj: Optional['logger'] = None,
+                 is_error_logger_obj: bool = False): # 新增参数：标记是否为错误日志管理器
+        self.log_directory = log_directory
+        self.log_file_path = None
+        self.file_handle = None
+        self.error_logger_obj = error_logger_obj
+        self.is_error_logger_obj = is_error_logger_obj # 新增：标记是否为错误日志管理器
+        self._is_initialized = False # 新增：标记日志文件是否已实际打开
+
+        # 尝试创建日志目录（对于所有logger实例，目录都应该存在）
+        try:
+            if not self.log_directory.exists():
+                os.makedirs(self.log_directory)
+                # 只有非错误日志管理器才打印创建目录的INFO日志到控制台
+                if not self.is_error_logger_obj:
+                    print(f"已创建日志文件夹: {normalize_drive_letter(str(self.log_directory))}")
+                    # 对于主日志，可以在目录创建后立即写入日志，但不使用to_error_log避免循环
+                    self.write_log(f"已创建日志文件夹: {normalize_drive_letter(str(self.log_directory))}", level="INFO", to_error_log=False)
+        except Exception as e:
+            print(f"关键错误: 无法创建日志文件夹 {normalize_drive_letter(str(self.log_directory))}. 日志将仅打印到控制台. 错误: {e}")
+            # 对于主日志，可以在目录创建失败后立即写入日志，但不使用to_error_log避免循环
+            self.write_log(f"关键错误: 无法创建日志文件夹 {normalize_drive_letter(str(self.log_directory))}. 日志将仅打印到控制台. 错误: {e}", level="CRITICAL", to_error_log=False)
+            self.log_directory = None
+
+        if self.log_directory: # 如果目录创建成功
+            if log_file_name is None:
+                self.log_file_path = self.log_directory / f"main_program_log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            else:
+                self.log_file_path = self.log_directory / log_file_name
+        else: # 目录创建失败，所有日志都将仅打印到控制台
+            self.log_file_path = None
+
+    def _ensure_log_file_open(self):
+        """
+        确保日志文件已打开。如果未打开，则尝试打开并设置 _is_initialized。
+        """
+        if self.file_handle is None and self.log_file_path:
+            try:
+                self.file_handle = open(self.log_file_path, 'a', encoding='utf-8')
+                self._is_initialized = True # 标记为已初始化
+                # 只有非错误日志管理器才打印文件打开的INFO日志到控制台和自身文件
+                if not self.is_error_logger_obj:
+                    print(f"日志文件已打开: {normalize_drive_letter(str(self.log_file_path))}")
+                    # 避免写入自身，否则会进入无限循环
+                    self.file_handle.write(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] 日志文件已打开: {normalize_drive_letter(str(self.log_file_path))}\n")
+                    self.file_handle.flush() # 立即写入
+            except Exception as e:
+                print(f"关键错误: 无法打开日志文件 {normalize_drive_letter(str(self.log_file_path))}. 所有后续日志将仅打印到控制台. 错误: {e}")
+                self.file_handle = None # 无法打开，设为None
+                # 对于自身打开失败，不应该再通过self.write_log去写入，否则可能陷入循环
+                # 这里直接打印到控制台并通知调用方（如果有的话）
+                # 原始代码中的自我写入会导致无限递归，所以这里直接依赖print
+
+    def write_log(self, message: str, level: str = "INFO", to_file_only: bool = False, to_error_log: bool = True):
+        """
+        写入日志信息到文件，如果文件句柄无效则打印到控制台。
+        Args:
+            message (str): 日志消息。
+            level (str): 日志级别 (INFO, WARNING, ERROR, CRITICAL).
+            to_file_only (bool): 如果为True，则只写入文件，不打印到控制台。
+            to_error_log (bool): 如果为True且存在error_logger_obj，则将WARNING/ERROR/CRITICAL日志写入错误日志。
+        """
+        timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+        log_message = f"{timestamp} [{level}] {message}"
+        
+        # 将WARNING, ERROR, CRITICAL 级别的日志写入单独的错误日志文件
+        # 并且确保不是错误日志管理器自己在给自己写（避免循环）
+        if to_error_log and self.error_logger_obj and self.error_logger_obj is not self and level in ["WARNING", "ERROR", "CRITICAL"]:
+            # 只有当错误日志管理器接收到实际的错误或警告时才触发其文件的打开和写入
+            self.error_logger_obj._ensure_log_file_open() # 确保错误日志文件已打开
+            if self.error_logger_obj.file_handle: # 再次检查句柄是否有效
+                try:
+                    self.error_logger_obj.file_handle.write(log_message + "\n")
+                    self.error_logger_obj.file_handle.flush()
+                except Exception as e:
+                    # 如果错误日志管理器写入失败，则打印到控制台，不应再次尝试通过logger写入
+                    print(f"关键错误: 写入错误日志文件 {normalize_drive_letter(str(self.error_logger_obj.log_file_path))} 失败. 消息: {message}. 错误: {e}")
+
+        # 对于当前logger实例，只有在文件被实际打开后才写入文件
+        # 或者如果是错误日志管理器，并且是WARNING/ERROR/CRITICAL级别才尝试打开并写入
+        should_write_to_this_file = False
+        if not self.is_error_logger_obj: # 对于主日志管理器和扫描日志管理器
+            self._ensure_log_file_open() # 确保文件已打开
+            should_write_to_this_file = True
+        elif self.is_error_logger_obj and level in ["WARNING", "ERROR", "CRITICAL"]: # 对于错误日志管理器，只有这些级别才写入
+            self._ensure_log_file_open() # 确保文件已打开
+            should_write_to_this_file = True
+
+        if should_write_to_this_file and self.file_handle:
+            try:
+                self.file_handle.write(log_message + "\n")
+                self.file_handle.flush() # 立即将缓冲区内容写入文件
+                if not to_file_only:
+                    print(log_message)
+            except Exception as e:
+                # 写入失败，打印到控制台
+                print(f"关键错误: 写入日志文件 {normalize_drive_letter(str(self.log_file_path))} 失败. 消息: {message}. 错误: {e}")
+                if self.file_handle:
+                    self.file_handle.close()
+                self.file_handle = None
+                print(f"日志消息重定向到控制台: {log_message}") # 失败后打印到控制台
+        else:
+            # 如果不应该写入文件（例如错误日志管理器未收到错误级别日志），或者文件句柄无效，则打印到控制台
+            if not to_file_only:
+                print(log_message)
+
+    def close(self):
+        """
+        关闭日志文件句柄。
+        """
+        if self.file_handle:
+            try:
+                self.file_handle.close()
+                self.file_handle = None
+                self._is_initialized = False # 重置初始化状态
+                # 只有非错误日志管理器才打印关闭信息
+                if not self.is_error_logger_obj:
+                    print(f"日志文件已关闭: {normalize_drive_letter(str(self.log_file_path))}")
+            except Exception as e:
+                print(f"关闭日志文件 {normalize_drive_letter(str(self.log_file_path))} 失败. 错误: {e}")
+                # 避免循环调用，直接打印
+                # self.write_log(f"关闭日志文件 {normalize_drive_letter(str(self.log_file_path))} 失败. 错误: {e}", level="ERROR", to_file_only=True, to_error_log=False)
+
+    def __del__(self):
+        """
+        析构函数，确保在对象被销毁时关闭文件句柄。
+        """
+        self.close()
+
+# --- NEW FUNCTION: Set Hyperlink and Style ---
 def set_hyperlink_and_style(
     cell, 
     location: Optional[str], # location 现在可以是 Optional[str]
@@ -117,14 +253,18 @@ def set_hyperlink_and_style(
             cell.hyperlink = location # 然后设置超链接目标
             cell.font = HYPERLINK_FONT # 最后应用预定义的超链接字体样式
             logger_obj.info(
-                f"成功设置超链接和样式 for '{display_text}' (Location: '{location}', Source: {source_description})"
+                f"成功设置超链接和样式 for '{display_text}' (Location: '{location}', Source: {source_description})", 
+                level="DEBUG", to_file_only=True
             )
         else:
             # 如果没有 location，确保不设置超链接，并移除可能的超链接样式
             cell.hyperlink = None 
             cell.font = Font(color="000000") # 恢复默认字体颜色，去除下划线
             # 这条日志保留，因为仍然是提示没有设置超链接，但级别可以低一些
-            logger_obj.info(f"未为 '{display_text}' (Source: {source_description}) 设置超链接，因为location无效或为空。")
+            logger_obj.info(
+                f"未为 '{display_text}' (Source: {source_description}) 设置超链接，因为location无效或为空。", 
+                level="INFO", to_file_only=True
+            )
 
     except Exception as e:
         logger_obj.error(
@@ -146,6 +286,7 @@ def set_fixed_column_widths(worksheet: Worksheet, width: int, logger_obj: logger
         for col_idx in range(1, worksheet.max_column + 1): # 从1开始遍历所有列
             column_letter = get_column_letter(col_idx)
             worksheet.column_dimensions[column_letter].width = width
+        #logger_obj.info(f"已为工作表 '{worksheet.title}' 设置所有列宽度为 {width}.", level="INFO", to_file_only=True)
         logger_obj.info(f"已为工作表 '{worksheet.title}' 设置所有列宽度为 {width}.") # 替换为 Loguru 的 info 方法，to_file_only 行为 Loguru 默认在 setup 时配置
     except Exception as e:
         #logger_obj.info(f"错误: 无法为工作表 '{worksheet.title}' 设置列宽: {e}")#error
@@ -413,8 +554,10 @@ def copy_file(source_path: Path, destination_path: Path, logger_obj:logger) -> b
         return True
     except PermissionError as e:
         if logger_obj:
-            logger_obj.critical(
-                f"权限错误: 复制文件从 '{normalize_drive_letter(str(source_path))}' 到 '{normalize_drive_letter(str(destination_path))}' 失败: {e}. 请确保目标文件未被其他程序（如Excel）占用。")
+            logger_obj.info(
+                f"权限错误: 复制文件从 '{normalize_drive_letter(str(source_path))}' 到 '{normalize_drive_letter(str(destination_path))}' 失败: {e}. 请确保目标文件未被其他程序（如Excel）占用。", 
+                level="CRITICAL"
+            )
         print(f"错误: 权限拒绝！无法复制文件到 '{destination_path}'。请确保该文件未被其他程序（如Excel）打开。错误: {e}")
         return False
     except Exception as e:
@@ -598,7 +741,7 @@ def scan_files_and_extract_data(
                 should_skip_current_path = True
 
             if should_skip_current_path:
-                logger_obj.info(f"跳过扫描文件夹及其子文件夹，因为它包含要跳过的名称: {normalize_drive_letter(str(root))}")
+                logger_obj.info(f"跳过扫描文件夹及其子文件夹，因为它包含要跳过的名称: {normalize_drive_letter(str(root))}", level="INFO", to_file_only=True)
                 dirs[:] = [] 
                 continue 
 
@@ -630,7 +773,7 @@ def scan_files_and_extract_data(
 
                 else:
                     # 这条日志保留，因为是文件系统层面的缺失，但级别可以低一些
-                    logger_obj.info(f"文件不存在，无法生成有效超链接: {normalize_drive_letter(str(file_abs_path))}") 
+                    logger_obj.info(f"文件不存在，无法生成有效超链接: {normalize_drive_letter(str(file_abs_path))}", level="INFO", to_file_only=True) 
                     file_link_text = f"文件不存在: {file_abs_path.name}" # 提示文件不存在
 
                 txt_content = ""
@@ -663,7 +806,7 @@ def scan_files_and_extract_data(
                         found_txt_flag = '否 (读取错误)'
                         not_found_txt_count += 1
                 else:
-                    logger_obj.info(f"未找到匹配的TXT文件: {normalize_drive_letter(str(file_path))}")
+                    logger_obj.info(f"未找到匹配的TXT文件: {normalize_drive_letter(str(file_path))}", level="INFO", to_file_only=True)
                     not_found_txt_count += 1
                 
                 current_row_data = [

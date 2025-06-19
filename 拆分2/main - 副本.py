@@ -58,72 +58,62 @@ setup_logger(log_output_dir)
 # --- Configuration ---
 # ... (这一部分在你的原始main.py中可能存在，请保留原有内容) ...
 # HYPERLINK_FONT = Font(color="0000FF", underline="single") # 如果Font不是从openpyxl导入并全局定义，则可能需要在这里定义
-def open_output_files_automatically(files_to_open: List[Path], logger):
+
+
+# ... (其他导入) ...
+import time # 确保导入了time模块
+
+# ... (其他函数定义) ...
+
+def open_output_files_automatically(file_paths: List[Path], logger_obj: logger):
     """
-    自动打开指定的文件。
+    根据用户设置自动打开生成的输出文件（Excel和Log文件）。
     Args:
-        files_to_open (List[Path]): 要打开的文件路径列表。
-        logger (LogManager): 主日志管理器实例。
+        file_paths (List[Path]): 包含要打开的文件路径的列表。
+        logger_obj (logger): Loguru logger 实例。
     """
-    try:
-        # 定义一个正则表达式来匹配文件路径中的日期时间戳 (YYYYMMDD_HHMMSS)
-        # 允许文件名在时间戳前后有其他字符，例如 scan_results_20240101_123045.xlsx 或 scan_history_backup_20240101_123045.xlsx
-        timestamp_pattern = re.compile(r'\d{8}_\d{6}')
+    if os.getenv("DISABLE_AUTO_OPEN", "0") == "1":
+        logger_obj.info("已禁用自动打开文件功能。")
+        return
 
-        for file_path_to_open in files_to_open:
-            if not file_path_to_open.exists():
-                logger.warning(f"警告: 尝试打开不存在的文件: {normalize_drive_letter(str(file_path_to_open))}")
-                continue
+    # 定义延迟时间 (秒)
+    OPEN_FILE_DELAY_SECONDS = 2 # 你建议的2秒延迟
 
-            # 检查文件名是否包含时间戳，或者是否为明确允许打开的临时文件（例如本次扫描结果）
-            # 我们只允许打开包含时间戳的文件作为“快照”，不打开作为“数据库”的源文件
-            # 这里的逻辑是：如果文件名包含时间戳，或者文件名是本次扫描生成的xlsx或log文件，则允许打开
-            file_name = file_path_to_open.name
-            
-            is_allowed_to_open = False
-            
-            # 检查是否包含时间戳（例如 cache 中的历史文件，或者备份的历史文件）
-            if timestamp_pattern.search(file_name):
-                is_allowed_to_open = True
-            
-            # 检查是否是本次扫描生成的 Excel 或 Log 文件（这些文件本身就包含时间戳和/或文件夹前缀）
-            # 新的命名约定：[folder_prefix]_scan_results_YYYYMMDD_HHMMSS.xlsx
-            #             [folder_prefix]_scan_log_YYYYMMDD_HHMMSS.txt
-            if re.match(r'.*_scan_results_\d{8}_\d{6}\.xlsx', file_name):
-                is_allowed_to_open = True
-            elif re.match(r'.*_scan_log_\d{8}_\d{6}\.txt', file_name):
-                is_allowed_to_open = True
-            elif file_name.startswith("error_warning_log_") and file_name.endswith(".txt"): # 允许打开错误日志
-                is_allowed_to_open = True
-            # [RESTORE] 恢复对以“scan_history_cached_”开头的文件的特殊允许，因为现在需要缓存备份
-            elif file_name.startswith("scan_history_cached_") and file_name.endswith(".xlsx"):
-                is_allowed_to_open = True
-            # [NEW] 允许打开因权限问题而生成的备用结果文件
-            elif file_name.startswith("FALLBACK_") and file_name.endswith(".xlsx"): # 修改为更通用的匹配FALLBACK_
-                is_allowed_to_open = True
+    for file_path in file_paths:
+        # --- 主要修改点 START ---
+        # 在尝试打开文件前增加延迟
+        logger_obj.debug(f"尝试打开文件 '{normalize_drive_letter(str(file_path))}' 前，等待 {OPEN_FILE_DELAY_SECONDS} 秒。")
+        time.sleep(OPEN_FILE_DELAY_SECONDS)
+        # --- 主要修改点 END ---
 
+        actual_path_to_open = file_path
+        # 特殊处理 Loguru 压缩后的日志文件（根据之前的讨论，这部分逻辑应该已经存在）
+        if file_path.suffix == '.txt' and not file_path.exists():
+            zip_path = file_path.with_suffix('.zip')
+            if zip_path.exists():
+                actual_path_to_open = zip_path
+                logger_obj.info(f"日志文件 '{normalize_drive_letter(str(file_path))}' 不存在，尝试打开压缩文件: {normalize_drive_letter(str(zip_path))}")
 
-            if not is_allowed_to_open:
-                logger.warning(f"拒绝自动打开没有时间戳或不符合命名约定的源文件: {normalize_drive_letter(str(file_path_to_open))}")
-                print(f"拒绝自动打开没有时间戳或不符合命名约定的源文件: {file_path_to_open}")
-                continue
+        if not actual_path_to_open.exists():
+            logger_obj.warning(f"警告: 无法自动打开文件 '{normalize_drive_letter(str(actual_path_to_open))}'，因为文件不存在。")
+            print(f"警告: 无法自动打开文件 '{actual_path_to_open}'，因为文件不存在。")
+            continue
 
+        try:
+            normalized_path = normalize_drive_letter(str(actual_path_to_open))
+            logger_obj.info(f"自动打开: {normalized_path}")
+            print(f"自动打开: {actual_path_to_open}")
+            if sys.platform == "win32":
+                os.startfile(normalized_path)
+            elif sys.platform == "darwin": # macOS
+                subprocess.run(["open", normalized_path], check=True)
+            else: # Linux
+                subprocess.run(["xdg-open", normalized_path], check=True)
+        except Exception as e:
+            logger_obj.error(f"自动打开文件 '{normalize_drive_letter(str(actual_path_to_open))}' 失败: {e}")
+            print(f"自动打开文件 '{actual_path_to_open}' 失败: {e}")
 
-            if sys.platform.startswith('win'): 
-                subprocess.Popen(f'start "" "{file_path_to_open}"', shell=True) 
-            elif sys.platform == 'darwin': 
-                subprocess.Popen(['open', str(file_path_to_open)])
-            else: 
-                subprocess.Popen(['xdg-open', str(file_path_to_open)])
-            
-            print(f"自动打开: {file_path_to_open}")
-            logger.info(f"自动打开: {normalize_drive_letter(str(file_path_to_open))}")
-
-    except Exception as e:
-        logger.error(f"错误: 自动打开文件失败. 错误: {e}")
-        print(f"错误: 无法自动打开文件。请手动检查。错误: {e}")
-
-# main.py
+# ... (main 函数的其余部分) ...
 
 # ... (保留原有导入，包括 from loguru import logger 和 from my_logger import setup_logger, get_error_log_file_path) ...
 
@@ -326,7 +316,7 @@ def main():
 
     logger.info("所有文件夹处理完毕，程序即将退出。")
     print("所有文件夹处理完毕，程序即将退出。")
-    logger.close()
+    #logger.close()
 
 if __name__ == "__main__":
     main()
