@@ -4,14 +4,8 @@ import datetime
 from pathlib import Path
 from typing import  Dict,List,Any
 
-
-
-
 # openpyxl 相关的导入
 from openpyxl import Workbook, load_workbook
-
-# Loguru 日志库
-from loguru import logger
 
 # 新增：从 my_logger 导入 normalize_drive_letter
 from file_system_utils import normalize_drive_letter # 新增行 2
@@ -40,7 +34,6 @@ class HistoryManager:
         """
         self.history_data = []
         if not self.history_file_path.exists():
-            #self.logger_obj.info(f"历史记录Excel文件不存在: {normalize_drive_letter(str(self.history_file_path))}. 将创建新文件。"
             self.logger_obj.info(f"历史记录Excel文件不存在: {normalize_drive_letter(str(self.history_file_path))}. 将创建新文件。") # 替换为 Loguru 的 info 方法
             return
 
@@ -127,16 +120,11 @@ class HistoryManager:
                 os.remove(str(self.history_file_path))
                 self.logger_obj.info(f"已删除旧的历史记录Excel文件: {normalize_drive_letter(str(self.history_file_path))}")
             except PermissionError as e: # 明确捕获权限错误
-                self.logger_obj.warning(f"警告: 无法删除旧的历史记录Excel文件 {normalize_drive_letter(str(self.history_file_path))}. 可能文件被占用. 错误: {e}")#warning
-                print(f"警告: 无法删除旧的历史记录Excel文件 {self.history_file_path}. 可能文件被占用. 错误: {e}")
-                self.logger_obj.critical("无法覆盖旧的历史文件，历史记录将无法保存。请关闭Excel中打开的历史文件。")#critical
+                self.logger_obj.critical(f"致命错误: 无法删除旧的历史记录Excel文件 '{normalize_drive_letter(str(self.history_file_path))}'，可能文件被占用。请关闭Excel中打开的历史文件。错误详情: {e}")
                 return False # 删除失败，返回False
             except Exception as e:
-                self.logger_obj.warning(f"警告: 删除旧的历史记录Excel文件时发生未知错误 {normalize_drive_letter(str(self.history_file_path))}. 错误: {e}")#warning
-                print(f"警告: 删除旧的历史记录Excel文件时发生未知错误 {self.history_file_path}. 错误: {e}")
-                self.logger_obj.critical("删除旧文件失败，历史记录将无法保存。")#critical
+                self.logger_obj.critical(f"致命错误: 删除旧的历史记录Excel文件 '{normalize_drive_letter(str(self.history_file_path))}' 时发生未知错误。历史记录将无法保存。错误详情: {e}")
                 return False # 删除失败，返回False
-
 
         try:
             wb = Workbook()
@@ -227,7 +215,6 @@ class HistoryManager:
 
         except Exception as e:
             self.logger_obj.error(f"错误: 将历史记录保存到Excel失败 {normalize_drive_letter(str(self.history_file_path))}: {e}")#error
-            print(f"错误: 将历史记录保存到Excel失败 {self.history_file_path}. 错误: {e}")
             return False
 
 

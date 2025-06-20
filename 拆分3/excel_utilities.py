@@ -50,46 +50,47 @@ def setup_excel_sheets(wb: Workbook) -> Tuple[Worksheet, Worksheet, Worksheet]:
 
 # --- 辅助函数 ---
 # 将 set_hyperlink_and_style 函数粘贴到这里
+# --- MODIFIED FUNCTION: 设置单元格超链接和样式 ---
 def set_hyperlink_and_style(
     cell, 
-    location: Optional[str], # location 现在可以是 Optional[str]
+    location: Optional[str], 
     display_text: str, 
     logger_obj, 
-    source_description: str = "未知源"
-):
+    source_description: str = "未知来源"
+) -> bool:
     """
-    封装设置单元格超链接和样式的逻辑。
+    为openpyxl单元格设置超链接和样式。
+    原理：
+        此函数现在专注于设置超链接和样式。它不再在内部记录所有非异常情况下的日志。
+        如果由于location无效而未能设置超链接，它会静默处理，但会在发生实际错误时记录ERROR级别的日志。
+        同时，函数返回一个布尔值来告知调用者操作是否成功，让调用者可以根据返回值进行后续处理或日志记录。
     Args:
-        cell: openpyxl 单元格对象。
-        location (Optional[str]): 超链接指向的实际位置（文件路径或URL）。如果为None或空字符串，则不设置超链接。
-        display_text (str): 在单元格中显示的文本。
-        logger_obj (logger): 日志管理器实例。
-        source_description (str): 描述超链接来源，用于日志记录。
+        cell: openpyxl单元格对象。
+        location (Optional[str]): 超链接的目标路径，如果为None或空字符串则不设置超链接。
+        display_text (str): 单元格显示的文本。
+        logger_obj: 日志管理器实例。
+        source_description (str): 用于日志记录的来源描述，方便定位问题。
+    Returns:
+        bool: 如果成功设置超链接则返回True，否则返回False。
     """
+    cell.value = display_text # 总是设置单元格的显示文本
     try:
-        cell.value = display_text # 首先设置单元格显示文本
-        
-        # 只有当 location 不为 None 且不为空时才设置超链接
-        if location: # 检查 location 是否有效
-            cell.hyperlink = location # 然后设置超链接目标
-            cell.font = HYPERLINK_FONT # 最后应用预定义的超链接字体样式
-            logger_obj.info(
-                f"成功设置超链接和样式 for '{display_text}' (Location: '{location}', Source: {source_description})"
-            )
+        if location: # 检查 location 是否存在且非空
+            cell.hyperlink = location
+            cell.font = HYPERLINK_FONT # 设置超链接字体样式
+            return True
         else:
             # 如果没有 location，确保不设置超链接，并移除可能的超链接样式
             cell.hyperlink = None 
             cell.font = Font(color="000000") # 恢复默认字体颜色，去除下划线
-            # 这条日志保留，因为仍然是提示没有设置超链接，但级别可以低一些
-            logger_obj.info(f"未为 '{display_text}' (Source: {source_description}) 设置超链接，因为location无效或为空。")
-
+            return False # 未设置超链接
     except Exception as e:
         logger_obj.error(
             f"错误: 无法为单元格设置超链接或样式 for '{display_text}' (Location: '{location}', Source: {source_description}). 错误: {e}"
         )
         # 即使出错，也要确保单元格值被设置，即使没有超链接样式
         cell.value = display_text
-
+        return False # 发生错误，未能设置超链接
 
 
 # --- NEW FUNCTION: Set Fixed Column Widths for a Worksheet ---

@@ -4,9 +4,7 @@ import time
 import subprocess
 from pathlib import Path
 from typing import List
-from loguru import logger
 from file_system_utils import normalize_drive_letter
-
 
 
 def open_output_files_automatically(file_paths: List[Path], logger_obj):
@@ -31,7 +29,7 @@ def open_output_files_automatically(file_paths: List[Path], logger_obj):
         # --- 主要修改点 END ---
 
         actual_path_to_open = file_path
-        # 特殊处理 Loguru 压缩后的日志文件（根据之前的讨论，这部分逻辑应该已经存在）
+        # 特殊处理 Loguru 压缩后的日志文件
         if file_path.suffix == '.txt' and not file_path.exists():
             zip_path = file_path.with_suffix('.zip')
             if zip_path.exists():
@@ -40,19 +38,18 @@ def open_output_files_automatically(file_paths: List[Path], logger_obj):
 
         if not actual_path_to_open.exists():
             logger_obj.warning(f"警告: 无法自动打开文件 '{normalize_drive_letter(str(actual_path_to_open))}'，因为文件不存在。")
-            print(f"警告: 无法自动打开文件 '{actual_path_to_open}'，因为文件不存在。")
             continue
 
         try:
             normalized_path = normalize_drive_letter(str(actual_path_to_open))
             logger_obj.info(f"自动打开: {normalized_path}")
-            print(f"自动打开: {actual_path_to_open}")
             if sys.platform == "win32":
                 os.startfile(normalized_path)
             elif sys.platform == "darwin": # macOS
-                subprocess.run(["open", normalized_path], check=True)
+                subprocess.run(['open', normalized_path], check=True)
             else: # Linux
-                subprocess.run(["xdg-open", normalized_path], check=True)
+                subprocess.run(['xdg-open', normalized_path], check=True)
+        except FileNotFoundError:
+            logger_obj.error(f"错误: 无法找到打开文件 '{normalized_path}' 的应用程序。请手动打开。")
         except Exception as e:
-            logger_obj.error(f"自动打开文件 '{normalize_drive_letter(str(actual_path_to_open))}' 失败: {e}")
-            print(f"自动打开文件 '{actual_path_to_open}' 失败: {e}")
+            logger_obj.error(f"错误: 自动打开文件 '{normalized_path}' 时发生意外错误: {e}")
