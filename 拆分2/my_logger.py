@@ -3,21 +3,8 @@
 from loguru import logger
 from pathlib import Path
 import os
-import sys
 import datetime # 确保这个导入也在，用于文件名
 
-
-# --- BEGIN MODIFICATION 2/X (确保 normalize_drive_letter 存在于 my_logger.py) ---
-# 将 normalize_drive_letter 函数定义直接放在这里 (如果它不在的话)
-def normalize_drive_letter(path_str: str) -> str:
-    """
-    标准化驱动器盘符大小写，确保路径在不同系统上的一致性。
-    例如，将 'c:\\path' 转换为 'C:\\path'。
-    """
-    if os.name == 'nt' and len(path_str) > 1 and path_str[1] == ':':
-        return path_str[0].upper() + path_str[1:]
-    return path_str
-# --- END MODIFICATION 2/X ---
 
 # --- 新增功能点：用于存储错误日志文件路径的全局变量 ---
 _error_log_file_path: Path = Path("N/A") # 初始化一个默认值，防止未设置时访问

@@ -1,4 +1,3 @@
-import re
 from typing import Tuple
 # --- Data Processor (RESTORED FROM V4.0) ---
 def detect_types(line: str, cleaned: str) -> str:

@@ -1,13 +1,41 @@
 import os
+import sys
 import shutil
 from pathlib import Path
-from typing import Tuple
-from loguru import logger # 如果这些函数内部使用了 logger 对象
+from typing import Tuple,List
+from loguru import logger # 导入 Loguru logger
 
-# 可能还需要从 my_logger 导入 normalize_drive_letter
-from my_logger import normalize_drive_letter # 因为 copy_file, validate_directory, create_directory_if_not_exists 内部使用了它
+# file_namer.py
+import re # 导入re模块用于正则表达式
+import hashlib # 导入hashlib用于生成文件夹名的哈希值
+
+# --- NEW FUNCTION: Generate a safe and identifiable folder prefix for filenames ---
+def generate_folder_prefix(folder_path: Path) -> str:
+    """
+    根据文件夹路径生成一个安全且可识别的前缀，用于文件名。
+    原理：
+        1. 获取文件夹的basename（即文件夹本身的名称）。
+        2. 如果 basename 包含中文或特殊字符，为了确保文件名在各种文件系统中的兼容性，
+           我们使用该 basename 的MD5哈希值的前8位作为唯一标识。
+        3. 如果 basename 只包含ASCII字符（数字、字母、下划线、短横线），
+           则直接使用 basename。
+        4. 最终前缀会限制长度，避免文件名过长。
+    Args:
+        folder_path (Path): 文件夹的Path对象。
+    Returns:
+        str: 一个安全且短小的字符串，用于作为文件名前缀。
+    """
+    folder_name = folder_path.name
+    # 检查是否包含非ASCII字符（例如中文），或者其他不适合作为文件名的字符
+    if not re.fullmatch(r'[\w.-]+', folder_name): # 允许字母、数字、下划线、点、短横线
+        # 如果包含特殊字符或中文，则使用哈希值
+        return hashlib.md5(folder_name.encode('utf-8')).hexdigest()[:8]
+    else:
+        # 否则，使用文件夹名，并限制长度，防止文件名过长
+        return folder_name[:30] # 限制为30个字符，避免过长
+
 # --- File Operations ---
-def validate_directory(path: Path, logger_obj: logger) -> bool:
+def validate_directory(path: Path, logger_obj) -> bool:
     """
     验证给定的路径是否是一个存在的目录。
     """
@@ -42,7 +70,7 @@ def create_directory_if_not_exists(directory_path: Path, logger_obj) -> bool: # 
             return False
     return True
 
-def copy_file(source_path: Path, destination_path: Path, logger_obj:logger) -> bool:
+def copy_file(source_path: Path, destination_path: Path, logger_obj) -> bool:
     """
     复制文件从源路径到目标路径。
     增加对权限错误的捕获和提示。
@@ -75,3 +103,47 @@ def get_file_details(file_path: Path) -> Tuple[str, str]:
     获取文件的名称（不含扩展名）和扩展名。
     """
     return file_path.stem, file_path.suffix
+
+# --- Utility Function to Normalize Drive Letter ---
+def normalize_drive_letter(path_str: str) -> str:
+    """
+    如果路径以驱动器号开头，将其转换为大写。
+    例如: c:\\test -> C:\\test
+    """
+    if sys.platform.startswith('win') and len(path_str) >= 2 and path_str[1] == ':':
+        return path_str[0].upper() + path_str[1:]
+    return path_str
+
+
+
+def read_batch_paths(batch_file_path: Path, logger_obj) -> List[Path]:
+    """
+    从 batchPath.txt 文件中读取需要扫描的文件夹路径列表。
+    Args:
+        batch_file_path (Path): batchPath.txt 文件的路径。
+        logger_obj (logger): 日志管理器实例。
+    Returns:
+        List[Path]: 文件夹路径的列表。
+    """
+    folders = []
+    if not batch_file_path.exists():
+        logger_obj.error(f"错误: 批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 不存在。")#error
+        print(f"错误: 批量路径文件 '{batch_file_path}' 不存在。")
+        return folders
+    try:
+        with open(batch_file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                path_str = line.strip()
+                if path_str and not path_str.startswith('#'): # 忽略空行和注释行
+                    folder_path = Path(path_str)
+                    if validate_directory(folder_path, logger_obj):
+                        folders.append(folder_path)
+                    else:
+                        logger_obj.warning(f"警告: 批量路径文件中的路径无效或不存在，已跳过: {normalize_drive_letter(str(folder_path))}")#warning
+        if not folders:
+            logger_obj.warning(f"警告: 批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 中没有找到有效的文件夹路径。")#warning
+    except Exception as e:
+        logger_obj.critical(f"错误: 读取批量路径文件 '{normalize_drive_letter(str(batch_file_path))}' 失败: {e}")#critical
+        print(f"错误: 读取批量路径文件 '{batch_file_path}' 失败。错误: {e}")
+    return folders
+
