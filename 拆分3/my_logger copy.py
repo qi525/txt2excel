@@ -4,23 +4,15 @@ from pathlib import Path
 import os
 import datetime
 import sys
+# from file_system_utils import normalize_drive_letter # 移除此行，因为my_logger.py内部不直接使用它
 
-# --- 新增功能点：用于存储错误日志文件路径的全局变量 ---
-_error_log_file_path: Path = Path("N/A") # 初始化一个默认值，防止未设置时访问
-
-
-# logger.remove() # <-- !!! 删除这行 !!!
+logger.remove() # 移除 Loguru 默认处理器
 
 def setup_logger(log_directory: Path) -> Path: # 修改函数签名，明确返回 Path 类型
     """
     配置 Loguru 日志器，设置多个日志输出目标。
     返回错误和警告日志文件的路径。
     """
-    # !!! 新增：在函数开始时移除所有现有处理器，确保每次调用都重新配置 !!!
-    logger.remove()
-
-    global _error_log_file_path # 声明要修改全局变量
-
     # 确保日志目录存在
     try:
         if not log_directory.exists():
@@ -71,15 +63,11 @@ def setup_logger(log_directory: Path) -> Path: # 修改函数签名，明确返�
         level="INFO",
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> <level>[{level}]</level> <level>{message}</level>",
         colorize=True,
-        filter=lambda record: record["level"].name in ["INFO", "SUCCESS"] # 只显示 INFO 和 SUCCESS 级别的消息
+        filter=lambda record: record["level"].name not in ["WARNING", "ERROR", "CRITICAL"] # 控制台不显示 WARNING, ERROR, CRITICAL，这些会写入单独文件
     )
-    # 更新全局错误日志文件路径变量
-    _error_log_file_path = error_warning_log_path
 
+    # 返回错误日志文件的路径
     return error_warning_log_path
 
-def get_error_log_file_path() -> Path:
-    """
-    获取当前会话的错误日志文件的路径。
-    """
-    return _error_log_file_path
+# 注意：_error_log_file_path 和 get_error_log_file_path 已被移除
+# 现在需要依赖 setup_logger 的返回值来获取错误日志路径。

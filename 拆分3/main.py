@@ -44,9 +44,7 @@ RETRY_DELAY_SECONDS = 2
 # 将 script_dir 和 log_output_folder 移到全局作用域
 script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
 log_output_folder = script_dir / "logs" # 或者根据你的配置路径
-# 初始化 Loguru 日志系统
-setup_logger(log_output_folder)
-# --- END MODIFICATION 1/X ---
+
 
 def main():
     history_folder_path = script_dir / HISTORY_FOLDER_NAME
