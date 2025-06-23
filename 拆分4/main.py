@@ -27,8 +27,8 @@ from file_system_utils import (
 # 从重构后的 scanner.py 导入函数
 from scanner import scan_files_and_extract_data, ExcelDataWriter
 
-# 导入 HistoryManager 和历史记录相关常量，并导入 _handle_history_caching 函数
-from history_execution import HistoryManager, HISTORY_FOLDER_NAME, HISTORY_EXCEL_NAME, _handle_history_caching # 修改导入
+# 导入 HistoryManager 和历史记录相关常量。注意：_handle_history_caching 已从这里移除导入
+from history_execution import HistoryManager, HISTORY_FOLDER_NAME, HISTORY_EXCEL_NAME
 
 # 导入自动打开文件的函数
 from file_opener import open_output_files_automatically
@@ -90,8 +90,17 @@ def main():
          "hyperlink_display_text": "打开结果XLSX", "hyperlink_not_exist_text": "结果XLSX文件不存在"}
     ]
 
-    # 实例化 HistoryManager，传入 field_definitions
-    history_manager = HistoryManager(final_history_excel_path, logger, file_scan_field_definitions)
+    # 初始化 final_files_to_open_at_end 列表
+    final_files_to_open_at_end: List[Path] = []
+
+    # 实例化 HistoryManager，传入 field_definitions 和新增参数
+    history_manager = HistoryManager(
+        history_file_path=final_history_excel_path, #
+        logger_obj=logger, #
+        field_definitions=file_scan_field_definitions, #
+        cache_folder_path=cache_folder_path, # 传入缓存路径
+        files_to_open_at_end=final_files_to_open_at_end # 传入文件列表引用
+    )
     # --- 结束修改历史管理器初始化和使用方式 ---
 
     batch_file_path = script_dir / "batchPath.txt"
@@ -105,8 +114,6 @@ def main():
         sys.exit(0)
 
     current_folder_log_sink_id: Optional[int] = None
-
-    final_files_to_open_at_end = []
 
     for folder_path in folders_to_scan:
         logger.info(f"\n--- 开始处理文件夹: {normalize_drive_letter(str(folder_path))} ---")
@@ -213,6 +220,7 @@ def main():
             logger.info(f"本次扫描历史记录已成功添加至内存。")
             # --- 结束修改 add_history_entry 的调用方式 ---
 
+            # 将本次扫描的日志和结果Excel添加到待打开列表
             files_to_open_this_scan = [current_scan_log_file]
             if actual_result_file_path.exists():
                 files_to_open_this_scan.append(actual_result_file_path)
@@ -231,16 +239,9 @@ def main():
     logger.info(f"准备保存 {len(history_manager.history_data)} 条历史记录到Excel。")
     logger.info(f"最初在 '{normalize_drive_letter(str(batch_file_path))}' 中检测到 {len(folders_to_scan)} 条有效地址。")
 
-    save_history_success = history_manager.save_history_to_excel()
-
-    # 调用新封装的缓存处理函数
-    _handle_history_caching(
-        save_history_success,
-        final_history_excel_path,
-        cache_folder_path,
-        logger,
-        final_files_to_open_at_end
-    )
+    # 调用 HistoryManager 的 save_history_to_excel 方法。
+    # 该方法内部会处理历史记录的保存和缓存快照的生成，并将缓存快照路径添加到 final_files_to_open_at_end 列表中。
+    save_history_success = history_manager.save_history_to_excel() #
 
     # Add error/warning log file to the list
     if error_warning_log_file_path and error_warning_log_file_path.exists():
@@ -248,6 +249,7 @@ def main():
     else:
         logger.warning("警告: 错误和警告日志文件不存在或路径无效，无法自动打开。")
 
+    # 统一打开所有收集到的文件，包括主结果Excel、日志和历史缓存快照
     open_output_files_automatically(final_files_to_open_at_end, logger)
 
     logger.info("所有文件夹处理完毕，程序即将退出。")

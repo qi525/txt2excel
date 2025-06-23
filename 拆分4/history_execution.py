@@ -10,64 +10,34 @@ from typing import Dict, List, Any, Optional, Tuple
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
-from file_system_utils import normalize_drive_letter, create_directory_if_not_exists, copy_file # 新增导入 create_directory_if_not_exists 和 copy_file
+from file_system_utils import normalize_drive_letter, create_directory_if_not_exists, copy_file
 
 # 导入辅助函数和常量
 from excel_utilities import set_hyperlink_and_style, set_fixed_column_widths
 from excel_utilities import FIXED_COLUMN_WIDTH
 
 # --- Configuration ---
-HISTORY_FOLDER_NAME = "操作记录"
-HISTORY_EXCEL_NAME = "operation_records.xlsx"
+# 这些常量可以移到主配置文件中，这里保留是为了模块内部可见性
+HISTORY_FOLDER_NAME = "操作记录" # 可以考虑移除，因为路径是传入的
+HISTORY_EXCEL_NAME = "operation_records.xlsx" # 可以考虑移除，因为路径是传入的
 
-# 粘贴 _handle_history_caching 函数到此处
-# 原理：封装历史记录Excel文件缓存的逻辑
-# 实现过程：将main函数中相关的缓存代码移动到此函数中，并接收必要的参数。
-# 主要改动点：新增此函数，并将缓存逻辑从main函数中剥离。
-def _handle_history_caching(
-    save_history_success: bool,
-    final_history_excel_path: Path,
-    cache_folder_path: Path,
-    logger_obj: Any, # loguru logger object
-    final_files_to_open_at_end: List[Path]
-) -> None:
-    """
-    处理历史记录Excel文件的缓存逻辑。
+# 移除 _handle_history_caching 函数，其逻辑将移入 HistoryManager 类中
+# 从这里删除了原 _handle_history_caching 函数
 
-    Args:
-        save_history_success (bool): 指示主历史记录Excel是否保存成功。
-        final_history_excel_path (Path): 主历史记录Excel文件的完整路径。
-        cache_folder_path (Path): 缓存目录的路径。
-        logger_obj (Any): 用于记录日志的logger对象。
-        final_files_to_open_at_end (List[Path]): 存储需要最终自动打开的文件的列表。
-                                                 如果缓存成功，会将缓存文件路径添加到此列表。
-    """
-    if save_history_success:
-        logger_obj.info("历史记录已成功保存到Excel。")
-        if create_directory_if_not_exists(cache_folder_path, logger_obj):
-            current_timestamp_for_cache = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            cached_history_file_name = f"scan_history_cached_{current_timestamp_for_cache}.xlsx"
-            cached_history_file_path = cache_folder_path / cached_history_file_name
-
-            logger_obj.info(f"开始复制历史记录到缓存文件夹: {normalize_drive_letter(str(cached_history_file_path))}")
-            copy_cache_success = copy_file(final_history_excel_path, cached_history_file_path, logger_obj)
-
-            if copy_cache_success:
-                logger_obj.info("历史记录已成功复制到缓存文件夹。")
-                final_files_to_open_at_end.append(cached_history_file_path)
-            else:
-                logger_obj.error("历史记录复制到缓存文件夹失败。")
-        else:
-            logger_obj.error(f"无法创建缓存文件夹: {normalize_drive_letter(str(cache_folder_path))}，将无法复制历史记录。")
-    else:
-        logger_obj.error("历史记录保存到Excel失败，将不会自动打开历史Excel文件。")
 
 class HistoryManager:
     """
     负责存储应用程序操作记录或活动日志的Excel文件。
     现在完全通用化，通过传入 field_definitions 配置数据结构。
     """
-    def __init__(self, history_file_path: Path, logger_obj, field_definitions: List[Dict[str, Any]], sheet_name: str = "操作记录"):
+    def __init__(self,
+                 history_file_path: Path,
+                 logger_obj,
+                 field_definitions: List[Dict[str, Any]],
+                 sheet_name: str = "操作记录",
+                 cache_folder_path: Optional[Path] = None, # 新增参数
+                 files_to_open_at_end: Optional[List[Path]] = None # 新增参数
+                ):
         """
         初始化HistoryManager。
         Args:
@@ -81,6 +51,8 @@ class HistoryManager:
                 - "hyperlink_display_text" (str, optional): 如果是路径且文件存在，超链接的显示文本。
                 - "hyperlink_not_exist_text" (str, optional): 如果是路径但文件不存在，超链接的显示文本。
             sheet_name (str, optional): Excel工作表的名称，默认为"操作记录"。
+            cache_folder_path (Optional[Path]): 缓存历史记录Excel文件的目录。如果为None则不进行缓存。
+            files_to_open_at_end (Optional[List[Path]]): 引用外部列表，用于存储最终需要自动打开的文件路径。
         """
         self.history_file_path = history_file_path
         self.logger_obj = logger_obj
@@ -98,6 +70,10 @@ class HistoryManager:
         self.path_field_definitions: Dict[str, Dict[str, Any]] = {
             fd["internal_key"]: fd for fd in field_definitions if fd.get("is_path", False)
         }
+
+        # 新增：缓存相关属性
+        self.cache_folder_path = cache_folder_path
+        self.files_to_open_at_end = files_to_open_at_end if files_to_open_at_end is not None else []
 
         self._load_history_from_excel()
 
@@ -291,6 +267,34 @@ class HistoryManager:
                     source_description=link_data["source_description"]
                 )
 
+    def _create_cached_snapshot(self, final_history_excel_path: Path) -> None:
+        """
+        原理：将保存成功的主历史记录Excel文件复制到缓存目录，作为快照。
+        实现过程：检查缓存目录是否存在，生成带时间戳的文件名，然后执行复制操作。
+        主要改动点：这是原 _handle_history_caching 函数的核心逻辑，现在作为类方法。
+        """
+        if self.cache_folder_path:
+            if create_directory_if_not_exists(self.cache_folder_path, self.logger_obj):
+                current_timestamp_for_cache = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                # 保持文件名一致性，使用scan_history_cached_前缀，因为这是扫描项目的历史记录
+                cached_history_file_name = f"scan_history_cached_{current_timestamp_for_cache}.xlsx"
+                cached_history_file_path = self.cache_folder_path / cached_history_file_name
+
+                self.logger_obj.info(f"开始复制历史记录到缓存文件夹: {normalize_drive_letter(str(cached_history_file_path))}")
+                copy_cache_success = copy_file(final_history_excel_path, cached_history_file_path, self.logger_obj)
+
+                if copy_cache_success:
+                    self.logger_obj.info("历史记录已成功复制到缓存文件夹。")
+                    if self.files_to_open_at_end is not None:
+                        self.files_to_open_at_end.append(cached_history_file_path)
+                else:
+                    self.logger_obj.error("历史记录复制到缓存文件夹失败。")
+            else:
+                self.logger_obj.error(f"无法创建缓存文件夹: {normalize_drive_letter(str(self.cache_folder_path))}，将无法复制历史记录。")
+        else:
+            self.logger_obj.info("未配置缓存文件夹路径，跳过历史记录缓存。")
+
+
     def save_history_to_excel(self) -> bool:
         """
         将内存中的所有数据记录保存到Excel文件。
@@ -313,6 +317,10 @@ class HistoryManager:
 
             wb.save(str(self.history_file_path))
             self.logger_obj.info(f"成功将数据记录保存到Excel: {normalize_drive_letter(str(self.history_file_path))}")
+
+            # 调用内部缓存方法
+            self._create_cached_snapshot(self.history_file_path) # 成功保存后，立即生成缓存快照
+
             return True
         except PermissionError as e:
             self.logger_obj.error(f"错误: 没有权限写入记录文件 '{normalize_drive_letter(str(self.history_file_path))}'，或文件被占用。请关闭文件。详情: {e}")
