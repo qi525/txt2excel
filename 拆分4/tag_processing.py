@@ -21,7 +21,7 @@ TAG_DETECTION_RULES: Dict[str, List[str]] = {
     'boy': ['1boy', '2boys', 'multiple_boys'],
     'no_human': ['no_human'],
     'furry': ['furry', 'animal_focus'],
-    '黑白原图': ['monochrome', 'greyscale'],
+    '黑白原图': ['monochrome', 'greyscale', 'spot_color'],
     '简单背景': ['background']
 }
 
