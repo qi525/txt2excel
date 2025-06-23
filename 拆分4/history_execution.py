@@ -277,7 +277,7 @@ class HistoryManager:
             if create_directory_if_not_exists(self.cache_folder_path, self.logger_obj):
                 current_timestamp_for_cache = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 # 保持文件名一致性，使用scan_history_cached_前缀，因为这是扫描项目的历史记录
-                cached_history_file_name = f"scan_history_cached_{current_timestamp_for_cache}.xlsx"
+                cached_history_file_name = f"operation_history_cached_{current_timestamp_for_cache}.xlsx"                
                 cached_history_file_path = self.cache_folder_path / cached_history_file_name
 
                 self.logger_obj.info(f"开始复制历史记录到缓存文件夹: {normalize_drive_letter(str(cached_history_file_path))}")
