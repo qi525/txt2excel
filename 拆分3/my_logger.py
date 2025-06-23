@@ -8,9 +8,6 @@ import sys
 # --- 新增功能点：用于存储错误日志文件路径的全局变量 ---
 _error_log_file_path: Path = Path("N/A") # 初始化一个默认值，防止未设置时访问
 
-
-# logger.remove() # <-- !!! 删除这行 !!!
-
 def setup_logger(log_directory: Path) -> Path: # 修改函数签名，明确返回 Path 类型
     """
     配置 Loguru 日志器，设置多个日志输出目标。

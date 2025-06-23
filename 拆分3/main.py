@@ -1,49 +1,52 @@
-# InterrogateText2Xlsx7.0_main.py
+# main.py
 
 import os
 import sys
 import datetime
 import time
 from pathlib import Path
-from typing import  Optional
+from typing import Optional, Dict, Any, List
 
-# 从 my_logger 导入 setup_logger 和 _error_log_file_path
+# 从 loguru 导入 logger，setup_logger 用于配置日志
 from loguru import logger
-# from my_logger import setup_logger, get_error_log_file_path, _error_log_file_path
-from my_logger import setup_logger, logger # 只需要导入 setup_logger 和 logger (如果main.py直接使用全局logger)
+from my_logger import setup_logger
 
-
-# 新增：从 excel_utilities 导入 create_main_workbook 和 setup_excel_sheets
+# 从 excel_utilities 导入相关函数和常量
 from excel_utilities import FIXED_COLUMN_WIDTH
-from excel_utilities import create_main_workbook, setup_excel_sheets 
+from excel_utilities import create_empty_workbook, create_sheet_with_headers, set_column_widths, set_hyperlink_and_style, set_fixed_column_widths
 
 
 from file_system_utils import (
     generate_folder_prefix,
     read_batch_paths,
     normalize_drive_letter,
-    create_directory_if_not_exists, 
+    create_directory_if_not_exists,
     copy_file
 )
 
-from scanner import scan_files_and_extract_data # 导入扫描函数
+# 从重构后的 scanner.py 导入函数
+from scanner import scan_files_and_extract_data, ExcelDataWriter
 
-from history_execution import HistoryManager,HISTORY_FOLDER_NAME,HISTORY_EXCEL_NAME # 导入历史记录相关常量
+# 导入 HistoryManager 和历史记录相关常量，并导入 _handle_history_caching 函数
+from history_execution import HistoryManager, HISTORY_FOLDER_NAME, HISTORY_EXCEL_NAME, _handle_history_caching # 修改导入
 
-from file_opener import open_output_files_automatically # 导入自动打开文件的函数
+# 导入自动打开文件的函数
+from file_opener import open_output_files_automatically
 
 # --- Configuration ---
 OUTPUT_FOLDER_NAME = "反推记录"
 CACHE_FOLDER_NAME = "cache"
 
 
-# 新增：文件保存重试参数
+# 文件保存重试参数
 MAX_SAVE_RETRIES = 5
 RETRY_DELAY_SECONDS = 2
 
 # 将 script_dir 和 log_output_folder 移到全局作用域
 script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
 log_output_folder = script_dir / "logs" # 或者根据你的配置路径
+
+# _handle_history_caching 函数定义已从这里删除，并移动到 history_execution.py 中
 
 
 def main():
@@ -52,9 +55,8 @@ def main():
     final_history_excel_path = history_folder_path / HISTORY_EXCEL_NAME
     cache_folder_path = script_dir / CACHE_FOLDER_NAME
 
-    # 新增：用于存储错误和警告日志文件路径
-    # error_warning_log_file_path = get_error_log_file_path()
-    error_warning_log_file_path = setup_logger(log_output_folder) # 修改为接收返回值
+    # 配置日志系统，并获取错误日志文件路径
+    error_warning_log_file_path = setup_logger(log_output_folder)
 
     logger.info(f"程序启动. 脚本目录: {normalize_drive_letter(str(script_dir))}")
     logger.info(f"日志文件将保存到: {normalize_drive_letter(str(log_output_folder))}")
@@ -72,7 +74,25 @@ def main():
         logger.critical("致命错误: 无法创建输出文件夹 (反推记录)，程序退出。")
         sys.exit(1)
 
-    history_manager = HistoryManager(final_history_excel_path, logger)
+    # --- 开始修改历史管理器初始化和使用方式 ---
+    # 定义文件扫描项目的字段结构
+    # 这里的顺序决定了Excel中列的顺序
+    file_scan_field_definitions: List[Dict[str, Any]] = [
+        {"internal_key": "scan_time", "excel_header": "扫描时间", "is_path": False},
+        {"internal_key": "folder_path", "excel_header": "文件夹路径", "is_path": True,
+         "hyperlink_display_text": "打开文件夹", "hyperlink_not_exist_text": "文件夹不存在"},
+        {"internal_key": "total_files", "excel_header": "总文件数", "is_path": False},
+        {"internal_key": "found_txt_count", "excel_header": "找到TXT文件数", "is_path": False},
+        {"internal_key": "not_found_txt_count", "excel_header": "未找到TXT文件数", "is_path": False},
+        {"internal_key": "log_file_abs_path", "excel_header": "Log文件绝对路径", "is_path": True,
+         "hyperlink_display_text": "打开Log", "hyperlink_not_exist_text": "Log文件不存在"},
+        {"internal_key": "result_xlsx_abs_path", "excel_header": "结果XLSX文件绝对路径", "is_path": True,
+         "hyperlink_display_text": "打开结果XLSX", "hyperlink_not_exist_text": "结果XLSX文件不存在"}
+    ]
+
+    # 实例化 HistoryManager，传入 field_definitions
+    history_manager = HistoryManager(final_history_excel_path, logger, file_scan_field_definitions)
+    # --- 结束修改历史管理器初始化和使用方式 ---
 
     batch_file_path = script_dir / "batchPath.txt"
     folders_to_scan = read_batch_paths(batch_file_path, logger)
@@ -86,13 +106,9 @@ def main():
 
     current_folder_log_sink_id: Optional[int] = None
 
-    # --- START MODIFICATION ---
-    # Initialize final_files_to_open_at_end here, at the top level of main()
     final_files_to_open_at_end = []
-    # --- END MODIFICATION ---
 
     for folder_path in folders_to_scan:
-        # ... (rest of the loop content, no changes needed here) ...
         logger.info(f"\n--- 开始处理文件夹: {normalize_drive_letter(str(folder_path))} ---")
 
         scan_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -121,11 +137,31 @@ def main():
         logger.info(f"开始扫描 {normalize_drive_letter(str(folder_path))}")
 
         try:
-            wb = create_main_workbook()
-            ws_matched, ws_no_txt, ws_tag_frequency = setup_excel_sheets(wb)
+            wb = create_empty_workbook()
 
+            # 定义各个工作表的标题
+            matched_headers = ["文件夹路径", "文件绝对路径", "文件链接", "文件扩展名",
+                               "TXT文件绝对路径", "TXT文件内容", "清洗后内容", "内容长度",
+                               "提示词类型", "找到TXT"]
+            unmatched_headers = ["文件夹路径", "文件绝对路径", "文件链接", "文件扩展名", "找到TXT"]
+            tag_frequency_headers = ["Tag", "出现次数"]
+
+            # 创建“匹配文件”工作表
+            ws_matched = create_sheet_with_headers(wb, "匹配文件", matched_headers, 0)
+
+            # 创建“未匹配文件”工作表
+            ws_no_txt = create_sheet_with_headers(wb, "未匹配文件", unmatched_headers, 1)
+
+            # 创建“Tag词频统计”工作表
+            ws_tag_frequency = create_sheet_with_headers(wb, "Tag词频统计", tag_frequency_headers, 2)
+
+
+            # 在调用 scan_files_and_extract_data 之前，创建 ExcelDataWriter 实例
+            excel_data_writer = ExcelDataWriter(ws_matched, ws_no_txt, logger)
             total_files, found_txt_count, not_found_txt_count, tag_counts = scan_files_and_extract_data(
-                folder_path, ws_matched, ws_no_txt, logger
+                folder_path,
+                excel_data_writer,
+                logger
             )
 
             sorted_tags = sorted(tag_counts.items(), key=lambda item: item[1], reverse=True)
@@ -133,7 +169,6 @@ def main():
                 ws_tag_frequency.append([tag, count])
 
             for worksheet in [ws_matched, ws_no_txt, ws_tag_frequency]:
-                from excel_utilities import set_fixed_column_widths
                 set_fixed_column_widths(worksheet, FIXED_COLUMN_WIDTH, logger)
 
             save_successful = False
@@ -164,10 +199,19 @@ def main():
                     logger.critical(f"致命错误: 尝试将扫描结果保存到备用位置 '{normalize_drive_letter(str(fallback_excel_file))}' 也失败了！错误: {fallback_e}")
                     actual_result_file_path = Path("N/A_SAVE_FAILED")
 
-            history_manager.add_history_entry(
-                folder_path, total_files, found_txt_count, not_found_txt_count, actual_result_file_path, current_scan_log_file
-            )
+            # --- 修改 add_history_entry 的调用方式 ---
+            new_entry_data: Dict[str, Any] = {
+                "scan_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "folder_path": folder_path,
+                "total_files": total_files,
+                "found_txt_count": found_txt_count,
+                "not_found_txt_count": not_found_txt_count,
+                "log_file_abs_path": current_scan_log_file,
+                "result_xlsx_abs_path": actual_result_file_path
+            }
+            history_manager.add_history_entry(new_entry_data)
             logger.info(f"本次扫描历史记录已成功添加至内存。")
+            # --- 结束修改 add_history_entry 的调用方式 ---
 
             files_to_open_this_scan = [current_scan_log_file]
             if actual_result_file_path.exists():
@@ -189,28 +233,14 @@ def main():
 
     save_history_success = history_manager.save_history_to_excel()
 
-    # The list is now initialized at the beginning of main()
-    # final_files_to_open_at_end = [] # This line is moved/removed
-
-    if save_history_success:
-        logger.info("历史记录已成功保存到Excel。")
-        if create_directory_if_not_exists(cache_folder_path, logger):
-            current_timestamp_for_cache = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            cached_history_file_name = f"scan_history_cached_{current_timestamp_for_cache}.xlsx"
-            cached_history_file_path = cache_folder_path / cached_history_file_name
-
-            logger.info(f"开始复制历史记录到缓存文件夹: {normalize_drive_letter(str(cached_history_file_path))}")
-            copy_cache_success = copy_file(final_history_excel_path, cached_history_file_path, logger)
-
-            if copy_cache_success:
-                logger.info("历史记录已成功复制到缓存文件夹。")
-                final_files_to_open_at_end.append(cached_history_file_path)
-            else:
-                logger.error("历史记录复制到缓存文件夹失败。")
-        else:
-            logger.error(f"无法创建缓存文件夹: {normalize_drive_letter(str(cache_folder_path))}，将无法复制历史记录。")
-    else:
-        logger.error("历史记录保存到Excel失败，将不会自动打开历史Excel文件。")
+    # 调用新封装的缓存处理函数
+    _handle_history_caching(
+        save_history_success,
+        final_history_excel_path,
+        cache_folder_path,
+        logger,
+        final_files_to_open_at_end
+    )
 
     # Add error/warning log file to the list
     if error_warning_log_file_path and error_warning_log_file_path.exists():
@@ -221,7 +251,6 @@ def main():
     open_output_files_automatically(final_files_to_open_at_end, logger)
 
     logger.info("所有文件夹处理完毕，程序即将退出。")
-    #logger.close()
 
 if __name__ == "__main__":
     main()
